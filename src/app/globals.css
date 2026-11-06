@@ -1,0 +1,175 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+    --primary: 262 83% 58%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 262 83% 58%;
+    --radius: 0.75rem;
+    --warning: 38 92% 50%;
+    --warning-foreground: 38 92% 20%;
+    --success: 142 76% 36%;
+    --success-foreground: 142 76% 97%;
+  }
+
+  .dark {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 240 10% 3.9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 240 10% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 262 83% 58%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 262 83% 58%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 38 92% 20%;
+    --success: 142 76% 36%;
+    --success-foreground: 142 76% 97%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* FullCalendar custom styles */
+.fc {
+  --fc-border-color: hsl(var(--border));
+  --fc-button-bg-color: hsl(var(--primary));
+  --fc-button-border-color: hsl(var(--primary));
+  --fc-button-hover-bg-color: hsl(var(--primary) / 0.9);
+  --fc-button-hover-border-color: hsl(var(--primary) / 0.9);
+  --fc-button-active-bg-color: hsl(var(--primary) / 0.8);
+  --fc-button-active-border-color: hsl(var(--primary) / 0.8);
+  --fc-today-bg-color: hsl(var(--primary) / 0.05);
+  --fc-event-bg-color: hsl(var(--primary));
+  --fc-event-border-color: hsl(var(--primary));
+  font-family: inherit !important;
+}
+
+/* Toolbar layout and spacing */
+.fc .fc-toolbar {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 1.25rem !important;
+  margin-bottom: 1.5rem !important;
+  padding: 0.25rem 0.5rem !important;
+  flex-wrap: wrap !important;
+}
+
+.fc .fc-toolbar-chunk {
+  display: flex !important;
+  align-items: center !important;
+  gap: 0.75rem !important;
+}
+
+.fc .fc-toolbar-title {
+  font-size: 1.35rem !important;
+  font-weight: 700 !important;
+  color: hsl(var(--foreground)) !important;
+  padding: 0 0.5rem !important;
+}
+
+/* Button groups spacing */
+.fc .fc-button-group {
+  display: inline-flex !important;
+  gap: 0.5rem !important;
+  background-color: transparent !important;
+}
+
+.fc .fc-button {
+  border-radius: 0.5rem !important;
+  font-size: 0.875rem !important;
+  font-weight: 500 !important;
+  padding: 0.45rem 0.85rem !important;
+  text-transform: capitalize !important;
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05) !important;
+  transition: all 0.15s ease-in-out !important;
+}
+
+.fc .fc-button-group > .fc-button {
+  margin: 0 !important;
+  border-radius: 0.5rem !important;
+}
+
+.fc .fc-prev-button,
+.fc .fc-next-button {
+  padding: 0.45rem 0.65rem !important;
+}
+
+.fc .fc-today-button {
+  margin-left: 0.25rem !important;
+  background-color: hsl(var(--secondary)) !important;
+  border-color: hsl(var(--border)) !important;
+  color: hsl(var(--foreground)) !important;
+}
+.fc .fc-today-button:hover {
+  background-color: hsl(var(--accent)) !important;
+  color: hsl(var(--accent-foreground)) !important;
+}
+
+.fc .fc-event {
+  border-radius: 0.375rem !important;
+  padding: 3px 6px !important;
+  font-size: 0.825rem !important;
+  cursor: pointer !important;
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1) !important;
+  border-width: 1px !important;
+}
+
+.fc .fc-event-main {
+  font-weight: 500 !important;
+  line-height: 1.25 !important;
+}
+
+/* Mobile adjustments */
+@media (max-width: 768px) {
+  .fc .fc-toolbar {
+    flex-direction: column !important;
+    gap: 0.75rem !important;
+    align-items: stretch !important;
+  }
+  .fc .fc-toolbar-chunk {
+    justify-content: center !important;
+    width: 100% !important;
+  }
+  .fc .fc-toolbar-title {
+    font-size: 1.1rem !important;
+    text-align: center !important;
+  }
+}

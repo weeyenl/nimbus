@@ -29,17 +29,19 @@ c:\code\nimbus\
 │   ├── app\
 │   │   ├── layout.tsx      # Root layout with PWA meta & AppShell
 │   │   ├── globals.css     # Tailwind styling + CSS variables + FullCalendar styling
-│   │   ├── page.tsx        # Salon Dashboard (KPIs, Today's schedule, Quick actions)
+│   │   ├── page.tsx        # Salon Dashboard (KPIs, Today's sales, Schedule, Quick actions)
 │   │   ├── calendar\       # Day/Week/Month appointment calendar
 │   │   ├── appointments\   # Appointment list with status filters
 │   │   │   ├── new\        # Booking form with auto-duration & groomer assignment
 │   │   │   ├── walk-in\    # Fast walk-in entry (immediate ARRIVED status)
-│   │   │   └── [id]\       # Appointment details & status transitions
-│   │   ├── customers\      # Customer search & list
+│   │   │   └── [id]\       # Checkout, add-ons, invoice modal, grooming health record
+│   │   ├── services\       # Service catalogue, dynamic pricing matrix calculator, club memberships
+│   │   ├── reports\        # Daily sales report, payment method breakdown, transaction receipts
+│   │   ├── customers\      # Customer search & directory
 │   │   │   ├── new\        # Customer creation with referral source
-│   │   │   └── [id]\       # Profile with pets list & appointment history
+│   │   │   └── [id]\       # Profile with club membership balance, pets list & history
 │   │   ├── pets\           # Pets directory
-│   │   │   ├── [id]\       # Pet detail, vaccination expiry, permanent warnings banner, visit history
+│   │   │   ├── [id]\       # Pet detail, vaccination expiry, permanent warnings banner, visit history timeline
 │   │   │   └── new\        # (under /customers/[id]/pets/new)
 │   │   └── staff\          # Groomer & receptionist profiles + weekly schedules
 │   ├── components\

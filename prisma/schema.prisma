@@ -1,0 +1,454 @@
+// ─────────────────────────────────────────────────────────────
+// Nimbus – Pet Grooming Department Management System
+// Prisma Schema  (PostgreSQL)
+// ─────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ──────────────────────────── Enums ─────────────────────────
+
+enum Role {
+  OWNER
+  RECEPTIONIST
+  GROOMER
+}
+
+enum AppointmentStatus {
+  BOOKED
+  ARRIVED
+  IN_PROGRESS
+  DONE
+  NO_SHOW
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  PAYNOW
+  DEPOSIT
+  MEMBERSHIP_CREDIT
+}
+
+enum PetSize {
+  SMALL
+  MEDIUM
+  LARGE
+  EXTRA_LARGE
+}
+
+enum CoatType {
+  SHORT
+  MEDIUM
+  LONG
+  DOUBLE
+  WIRE
+  CURLY
+}
+
+enum SkinCondition {
+  NORMAL
+  DRY
+  RED
+  RASHES
+  HOT_SPOTS
+  FLEAS_TICKS
+  MATTING
+  DANDRUFF
+  BALD_PATCHES
+}
+
+enum BodyLocation {
+  EARS
+  BELLY
+  LEGS
+  TAIL
+  FACE
+  PAWS
+  BACK
+  NECK
+  CHEST
+}
+
+enum MembershipTierName {
+  BASIC
+  STANDARD
+  VIP
+  SVIP
+}
+
+enum DayOfWeek {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+// ──────────────────────────── Models ────────────────────────
+
+/// Internal staff members (owners, receptionists, groomers).
+model Staff {
+  id        String   @id @default(uuid()) @db.Uuid
+  email     String   @unique
+  name      String
+  phone     String?
+  role      Role
+  avatarUrl String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  appointments    Appointment[]
+  weeklySchedules WeeklySchedule[]
+
+  @@index([email])
+  @@index([role])
+  @@map("staff")
+}
+
+/// Recurring weekly availability for each staff member.
+model WeeklySchedule {
+  id        String    @id @default(uuid()) @db.Uuid
+  staffId   String    @db.Uuid
+  dayOfWeek DayOfWeek
+  startTime String    // e.g. "09:00"
+  endTime   String    // e.g. "18:00"
+  isWorking Boolean   @default(true)
+
+  staff Staff @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@unique([staffId, dayOfWeek])
+  @@index([staffId])
+  @@map("weekly_schedules")
+}
+
+/// Pet owners / customers.
+model Customer {
+  id             String   @id @default(uuid()) @db.Uuid
+  name           String
+  phone          String   @unique
+  email          String?
+  address        String?
+  referralSource String?
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  pets         Pet[]
+  memberships  CustomerMembership[]
+  appointments Appointment[]
+
+  @@index([phone])
+  @@index([name])
+  @@map("customers")
+}
+
+/// Pets belonging to a customer.
+model Pet {
+  id         String    @id @default(uuid()) @db.Uuid
+  customerId String    @db.Uuid
+  name       String
+  breed      String?
+  age        Int?
+  size       PetSize?
+  weight     Float?
+  coatType   CoatType?
+  photoUrl   String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  customer       Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  appointments   Appointment[]
+  vaccinations   Vaccination[]
+  permanentNotes PermanentNote[]
+
+  @@index([customerId])
+  @@index([name])
+  @@map("pets")
+}
+
+/// Vaccination records for a pet.
+model Vaccination {
+  id         String    @id @default(uuid()) @db.Uuid
+  petId      String    @db.Uuid
+  name       String    // e.g. "Rabies"
+  dateGiven  DateTime
+  expiryDate DateTime?
+  notes      String?
+  createdAt  DateTime  @default(now())
+
+  pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
+
+  @@index([petId])
+  @@map("vaccinations")
+}
+
+/// Persistent notes on a pet (e.g. "bites", "sensitive skin").
+model PermanentNote {
+  id        String   @id @default(uuid()) @db.Uuid
+  petId     String   @db.Uuid
+  content   String
+  isWarning Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
+
+  @@index([petId])
+  @@map("permanent_notes")
+}
+
+/// Grooming services offered (e.g. "Full Groom", "Bath & Dry").
+model Service {
+  id                     String   @id @default(uuid()) @db.Uuid
+  name                   String
+  description            String?
+  defaultDurationMinutes Int
+  isActive               Boolean  @default(true)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  priceRules   ServicePriceRule[]
+  addons       ServiceAddon[]
+  appointments Appointment[]
+
+  @@index([name])
+  @@map("services")
+}
+
+/// Dynamic pricing matrix – most-specific matching rule wins.
+/// Null optional fields mean "any".
+model ServicePriceRule {
+  id        String    @id @default(uuid()) @db.Uuid
+  serviceId String    @db.Uuid
+  petSize   PetSize?
+  breed     String?
+  coatType  CoatType?
+  price     Decimal   @db.Decimal(10, 2)
+
+  service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@index([serviceId])
+  @@index([serviceId, petSize, coatType])
+  @@map("service_price_rules")
+}
+
+/// Optional add-ons for a service (surcharges, extras).
+model ServiceAddon {
+  id           String   @id @default(uuid()) @db.Uuid
+  serviceId    String   @db.Uuid
+  name         String
+  defaultPrice Decimal  @db.Decimal(10, 2)
+  description  String?
+  isActive     Boolean  @default(true)
+
+  service           Service            @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  appointmentAddons AppointmentAddon[]
+
+  @@index([serviceId])
+  @@map("service_addons")
+}
+
+/// A booked (or walk-in) grooming appointment.
+model Appointment {
+  id            String            @id @default(uuid()) @db.Uuid
+  petId         String            @db.Uuid
+  staffId       String            @db.Uuid
+  serviceId     String            @db.Uuid
+  customerId    String            @db.Uuid
+  scheduledDate DateTime
+  startTime     DateTime
+  endTime       DateTime
+  status        AppointmentStatus @default(BOOKED)
+  isWalkIn      Boolean           @default(false)
+  totalPrice    Decimal?          @db.Decimal(10, 2)
+  notes         String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  pet              Pet                @relation(fields: [petId], references: [id], onDelete: Cascade)
+  staff            Staff              @relation(fields: [staffId], references: [id], onDelete: Restrict)
+  service          Service            @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  customer         Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  groomingRecord   GroomingRecord?
+  appointmentAddons AppointmentAddon[]
+  payment          Payment?
+  creditTransactions CreditTransaction[]
+
+  @@index([petId])
+  @@index([staffId])
+  @@index([serviceId])
+  @@index([customerId])
+  @@index([scheduledDate])
+  @@index([status])
+  @@index([scheduledDate, status])
+  @@map("appointments")
+}
+
+/// Add-ons attached to a specific appointment.
+model AppointmentAddon {
+  id             String  @id @default(uuid()) @db.Uuid
+  appointmentId  String  @db.Uuid
+  serviceAddonId String  @db.Uuid
+  price          Decimal @db.Decimal(10, 2)
+  notes          String?
+
+  appointment  Appointment  @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  serviceAddon ServiceAddon @relation(fields: [serviceAddonId], references: [id], onDelete: Restrict)
+
+  @@index([appointmentId])
+  @@index([serviceAddonId])
+  @@map("appointment_addons")
+}
+
+/// Post-groom record filled in by the groomer (one per appointment).
+model GroomingRecord {
+  id                  String          @id @default(uuid()) @db.Uuid
+  appointmentId       String          @unique @db.Uuid
+  haircutStyle        String?         // e.g. "teddy bear cut"
+  bladeGuardLength    String?
+  skinConditions      SkinCondition[] // PostgreSQL array of enum
+  skinConditionNotes  String?
+  issueLocations      BodyLocation[]  // PostgreSQL array of enum
+  healthObservations  String?
+  behaviour           String?
+  recommendationToOwner String?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@map("grooming_records")
+}
+
+/// Payment record for an appointment.
+model Payment {
+  id                   String        @id @default(uuid()) @db.Uuid
+  appointmentId        String        @unique @db.Uuid
+  method               PaymentMethod
+  amount               Decimal       @db.Decimal(10, 2)
+  depositAmount        Decimal       @default(0) @db.Decimal(10, 2)
+  balanceAmount        Decimal       @default(0) @db.Decimal(10, 2)
+  membershipCreditUsed Decimal       @default(0) @db.Decimal(10, 2)
+  notes                String?
+  paidAt               DateTime      @default(now())
+  createdAt            DateTime      @default(now())
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@map("payments")
+}
+
+/// Membership tier definitions (e.g. BASIC, VIP).
+model MembershipTier {
+  id               String             @id @default(uuid()) @db.Uuid
+  name             MembershipTierName @unique
+  displayName      String
+  price            Decimal            @db.Decimal(10, 2)
+  bonusCredits     Decimal            @db.Decimal(10, 2)
+  totalCredits     Decimal            @db.Decimal(10, 2)
+  validityMonths   Int
+  hasQueuePriority Boolean            @default(false)
+  isActive         Boolean            @default(true)
+
+  addOnAllowances     AddOnAllowanceTemplate[]
+  customerMemberships CustomerMembership[]
+
+  @@map("membership_tiers")
+}
+
+/// Template: how many free add-ons a tier includes.
+model AddOnAllowanceTemplate {
+  id               String @id @default(uuid()) @db.Uuid
+  membershipTierId String @db.Uuid
+  addonName        String // e.g. "Spa Therapy Add-on"
+  quantity         Int
+
+  membershipTier MembershipTier @relation(fields: [membershipTierId], references: [id], onDelete: Cascade)
+
+  @@index([membershipTierId])
+  @@map("add_on_allowance_templates")
+}
+
+/// A customer's active (or expired) membership.
+model CustomerMembership {
+  id               String   @id @default(uuid()) @db.Uuid
+  customerId       String   @db.Uuid
+  membershipTierId String   @db.Uuid
+  purchaseDate     DateTime @default(now())
+  expiryDate       DateTime
+  remainingCredits Decimal  @db.Decimal(10, 2)
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  customer       Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  membershipTier MembershipTier @relation(fields: [membershipTierId], references: [id], onDelete: Restrict)
+
+  remainingAddOnAllowances RemainingAddOnAllowance[]
+  creditTransactions       CreditTransaction[]
+
+  @@index([customerId])
+  @@index([membershipTierId])
+  @@index([customerId, isActive])
+  @@map("customer_memberships")
+}
+
+/// Tracks remaining free add-on uses for a customer membership.
+model RemainingAddOnAllowance {
+  id                   String @id @default(uuid()) @db.Uuid
+  customerMembershipId String @db.Uuid
+  addonName            String
+  remainingQuantity    Int
+
+  customerMembership CustomerMembership @relation(fields: [customerMembershipId], references: [id], onDelete: Cascade)
+
+  @@index([customerMembershipId])
+  @@map("remaining_add_on_allowances")
+}
+
+/// Ledger of credit usage / top-ups for a membership.
+model CreditTransaction {
+  id                   String   @id @default(uuid()) @db.Uuid
+  customerMembershipId String   @db.Uuid
+  appointmentId        String?  @db.Uuid
+  amount               Decimal  @db.Decimal(10, 2)
+  description          String
+  createdAt            DateTime @default(now())
+
+  customerMembership CustomerMembership @relation(fields: [customerMembershipId], references: [id], onDelete: Cascade)
+  appointment        Appointment?       @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+
+  @@index([customerMembershipId])
+  @@index([appointmentId])
+  @@map("credit_transactions")
+}
+
+/// Promotional / discount codes.
+model PromoCode {
+  id            String    @id @default(uuid()) @db.Uuid
+  code          String    @unique
+  description   String?
+  discountType  String    // "PERCENTAGE", "FIXED", "FREE_ADDON"
+  discountValue Decimal?  @db.Decimal(10, 2)
+  freeAddonName String?
+  isActive      Boolean   @default(true)
+  validFrom     DateTime?
+  validUntil    DateTime?
+  maxUses       Int?
+  currentUses   Int       @default(0)
+  createdAt     DateTime  @default(now())
+
+  @@index([code])
+  @@map("promo_codes")
+}
