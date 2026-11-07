@@ -159,6 +159,36 @@ export function localDateStr(d: Date = new Date()): string {
   return `${y}-${m}-${day}`;
 }
 
+export function getPaymentDateStr(paidAt?: string, fallbackAptDate?: string): string | null {
+  if (fallbackAptDate) return fallbackAptDate;
+  if (!paidAt) return null;
+  const isoMatch = paidAt.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+  const ddmmyyyyMatch = paidAt.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (ddmmyyyyMatch) {
+    const [, d, m, y] = ddmmyyyyMatch;
+    return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+  }
+  return null;
+}
+
+export function isPaymentFromDate(paidAt: string | undefined, targetDateStr: string): boolean {
+  if (!paidAt) return false;
+  // targetDateStr is "YYYY-MM-DD" e.g. "2026-11-07"
+  if (paidAt.includes(targetDateStr)) return true;
+
+  // Handle DD/MM/YYYY or D/M/YYYY formats (e.g. "07/11/2026" or "7/11/2026")
+  const parts = targetDateStr.split("-");
+  if (parts.length === 3) {
+    const [y, m, d] = parts;
+    const ddmmyyyy = `${d}/${m}/${y}`;
+    const dmmyyyy = `${parseInt(d, 10)}/${parseInt(m, 10)}/${y}`;
+    if (paidAt.includes(ddmmyyyy) || paidAt.includes(dmmyyyy)) return true;
+  }
+
+  return false;
+}
+
 function getTodayOffsetStr(daysOffset: number = 0): string {
   const d = new Date();
   d.setDate(d.getDate() + daysOffset);
@@ -1114,4 +1144,42 @@ export function deleteStaff(staffId: string): void {
   const current = getStaff();
   const updated = current.filter((s) => s.id !== staffId);
   commit(STORAGE_KEYS.STAFF, updated);
+}
+
+// 11. SALON & CALENDAR SETTINGS
+export interface SalonSettings {
+  calendarStartTime: string; // e.g. "08:00"
+  calendarEndTime: string;   // e.g. "21:00" (slots run up to 9 PM)
+}
+
+export const DEFAULT_SALON_SETTINGS: SalonSettings = {
+  calendarStartTime: "08:00",
+  calendarEndTime: "21:00",
+};
+
+export function getSalonSettings(): SalonSettings {
+  if (typeof window === "undefined") return DEFAULT_SALON_SETTINGS;
+  try {
+    const raw = localStorage.getItem("nimbus_settings");
+    if (raw) {
+      let parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        parsed = parsed[0];
+      }
+      if (parsed && typeof parsed === "object") {
+        return {
+          calendarStartTime: typeof parsed.calendarStartTime === "string" ? parsed.calendarStartTime : DEFAULT_SALON_SETTINGS.calendarStartTime,
+          calendarEndTime: typeof parsed.calendarEndTime === "string" ? parsed.calendarEndTime : DEFAULT_SALON_SETTINGS.calendarEndTime,
+        };
+      }
+    }
+  } catch {}
+  return DEFAULT_SALON_SETTINGS;
+}
+
+export function saveSalonSettings(settings: Partial<SalonSettings>): void {
+  if (typeof window === "undefined") return;
+  const current = getSalonSettings();
+  const updated: SalonSettings = { ...current, ...settings };
+  localStorage.setItem("nimbus_settings", JSON.stringify(updated));
 }

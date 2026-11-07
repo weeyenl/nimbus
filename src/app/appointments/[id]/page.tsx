@@ -66,6 +66,8 @@ import {
   getPayments,
   savePayment,
   getAddons,
+  getStaff,
+  localDateStr,
   MockAppointment,
   CustomerMembership,
   GroomingRecord,
@@ -106,6 +108,14 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
   const [isRecordOpen, setIsRecordOpen] = useState(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [isReceiptOpen, setIsReceiptOpen] = useState(false);
+  const [isRescheduleOpen, setIsRescheduleOpen] = useState(false);
+  const [saveStatusFeedback, setSaveStatusFeedback] = useState<string | null>(null);
+
+  // Reschedule Form state
+  const [editDate, setEditDate] = useState("");
+  const [editStartTime, setEditStartTime] = useState("");
+  const [editEndTime, setEditEndTime] = useState("");
+  const [editGroomerId, setEditGroomerId] = useState("");
 
   // Price adjustment
   const [customPrice, setCustomPrice] = useState<number>(85);
@@ -136,6 +146,10 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
       setStatus(found.status);
       setCustomPrice(found.servicePrice);
       if (found.addOns) setSelectedAddons(found.addOns);
+      setEditDate(found.dateStr);
+      setEditStartTime(found.startTime);
+      setEditEndTime(found.endTime);
+      setEditGroomerId(found.groomerId);
 
       const mem = getCustomerMembership(found.customerId);
       setMembership(mem);
@@ -170,7 +184,31 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
   function handleStatusChange(newStatus: string) {
     if (!apt) return;
     setStatus(newStatus);
+    const updated = { ...apt, status: newStatus as any };
+    setApt(updated);
     updateAppointmentStatus(apt.id, newStatus as any);
+    setSaveStatusFeedback("Status updated & auto-saved!");
+    setTimeout(() => setSaveStatusFeedback(null), 3000);
+  }
+
+  function handleSaveSchedule(e: React.FormEvent) {
+    e.preventDefault();
+    if (!apt) return;
+    const allStaff = getStaff();
+    const groomer = allStaff.find((s) => s.id === editGroomerId) || allStaff[0];
+    const updatedApt: MockAppointment = {
+      ...apt,
+      dateStr: editDate,
+      startTime: editStartTime,
+      endTime: editEndTime,
+      groomerId: groomer?.id || apt.groomerId,
+      groomerName: groomer?.name || apt.groomerName,
+    };
+    saveAppointment(updatedApt);
+    setApt(updatedApt);
+    setIsRescheduleOpen(false);
+    setSaveStatusFeedback("Schedule updated & saved!");
+    setTimeout(() => setSaveStatusFeedback(null), 3000);
   }
 
   function handleAddAddon(addonId: string) {
@@ -282,7 +320,7 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
       totalAmount: grandTotal,
       paymentMethod,
       membershipCreditsDeducted: paymentMethod === "MEMBERSHIP_CREDIT" ? grandTotal : undefined,
-      paidAt: new Date().toLocaleString("en-SG"),
+      paidAt: `${localDateStr()} ${new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}`,
       status: "PAID",
     };
 
@@ -290,8 +328,18 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
     setPaymentRecord(newPayment);
     setIsCheckoutOpen(false);
     setIsReceiptOpen(true);
-    apt.isPaid = true;
-    saveAppointment(apt);
+
+    // Automatically mark appointment as PAID and DONE
+    const updatedApt: MockAppointment = {
+      ...apt,
+      isPaid: true,
+      status: "DONE",
+    };
+    saveAppointment(updatedApt);
+    setApt(updatedApt);
+    setStatus("DONE");
+    setSaveStatusFeedback("Payment received & marked as Done!");
+    setTimeout(() => setSaveStatusFeedback(null), 3000);
   }
 
   function applyPromoCode() {
@@ -328,7 +376,25 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
               </Badge>
             )}
           </div>
-          <p className="text-muted-foreground">{apt.dateStr} · {apt.startTime} - {apt.endTime}</p>
+          <div className="flex flex-wrap items-center gap-2 mt-1">
+            <p className="text-muted-foreground text-sm">
+              {apt.dateStr} · {apt.startTime} - {apt.endTime} ({apt.groomerName})
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 text-xs px-2 gap-1"
+              onClick={() => {
+                setEditDate(apt.dateStr);
+                setEditStartTime(apt.startTime);
+                setEditEndTime(apt.endTime);
+                setEditGroomerId(apt.groomerId);
+                setIsRescheduleOpen(true);
+              }}
+            >
+              <Clock className="h-3 w-3" /> Change Date / Time
+            </Button>
+          </div>
         </div>
 
         <div className="flex gap-2">
@@ -373,7 +439,7 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
       {/* Action / Status & Record Strip */}
       <Card className="shadow-sm">
         <CardContent className="flex flex-wrap items-center justify-between gap-4 p-4">
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <span className="text-sm font-semibold">Appointment Status:</span>
             <Select value={status} onValueChange={handleStatusChange}>
               <SelectTrigger className="w-48">
@@ -387,6 +453,15 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
                 ))}
               </SelectContent>
             </Select>
+            {saveStatusFeedback ? (
+              <span className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1 transition-all">
+                <CheckCircle2 className="h-3.5 w-3.5" /> {saveStatusFeedback}
+              </span>
+            ) : (
+              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                <CheckCircle2 className="h-3 w-3 text-muted-foreground/60" /> Auto-saved instantly
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
@@ -926,6 +1001,79 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
               Done
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reschedule Modal */}
+      <Dialog open={isRescheduleOpen} onOpenChange={setIsRescheduleOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Change Date & Time</DialogTitle>
+            <DialogDescription>
+              Reschedule appointment for {apt.petName} ({apt.customerName}).
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleSaveSchedule} className="space-y-4 pt-2">
+            <div>
+              <Label className="text-xs">Date</Label>
+              <Input
+                type="date"
+                value={editDate}
+                onChange={(e) => setEditDate(e.target.value)}
+                required
+                className="mt-1"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs">Start Time</Label>
+                <Input
+                  type="time"
+                  value={editStartTime}
+                  onChange={(e) => setEditStartTime(e.target.value)}
+                  required
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label className="text-xs">End Time</Label>
+                <Input
+                  type="time"
+                  value={editEndTime}
+                  onChange={(e) => setEditEndTime(e.target.value)}
+                  required
+                  className="mt-1"
+                />
+              </div>
+            </div>
+
+            <div>
+              <Label className="text-xs">Assigned Groomer / Staff</Label>
+              <Select value={editGroomerId} onValueChange={setEditGroomerId}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Select staff..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {getStaff().map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.name} ({s.role})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <DialogFooter className="pt-2 gap-2 sm:gap-0">
+              <Button type="button" variant="outline" onClick={() => setIsRescheduleOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit">
+                Save Schedule
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </div>

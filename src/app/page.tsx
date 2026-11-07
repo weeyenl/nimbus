@@ -24,6 +24,7 @@ import {
   MockAppointment,
   PaymentRecord,
   localDateStr,
+  isPaymentFromDate,
 } from "@/lib/mock-data";
 import { APPOINTMENT_STATUS_COLORS, APPOINTMENT_STATUS_LABELS } from "@/lib/utils";
 
@@ -42,7 +43,14 @@ export default function DashboardPage() {
   const todaysAppointments = appointments.filter((apt) => apt.dateStr === todayStr);
   const inProgressCount = todaysAppointments.filter((apt) => apt.status === "IN_PROGRESS").length;
   const todaysRevenue = payments
-    .filter((p) => p.paidAt.includes(todayStr))
+    .filter((p) => {
+      if (isPaymentFromDate(p.paidAt, todayStr)) return true;
+      if (p.appointmentId) {
+        const matchApt = appointments.find((a) => a.id === p.appointmentId);
+        if (matchApt && matchApt.dateStr === todayStr) return true;
+      }
+      return false;
+    })
     .reduce((sum, p) => sum + p.totalAmount, 0);
 
   return (

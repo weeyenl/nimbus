@@ -157,22 +157,37 @@
 }
 
 /* Time axis (hours 8am, 9am, etc.) styling */
+.fc .fc-timegrid-axis {
+  width: 4.75rem !important;
+  min-width: 4.75rem !important;
+}
+
 .fc .fc-timegrid-slot-label {
-  vertical-align: top !important;
+  vertical-align: middle !important;
+  width: 4.75rem !important;
+  min-width: 4.75rem !important;
+  text-align: center !important;
 }
 
 .fc .fc-timegrid-slot-label-frame {
-  padding-top: 4px !important;
-  padding-bottom: 2px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 100% !important;
+  text-align: center !important;
+  padding: 0 6px !important;
 }
 
 .fc .fc-timegrid-slot-label-cushion {
-  font-size: 0.72rem !important;
+  display: inline-block !important;
+  white-space: nowrap !important;
+  font-size: 0.75rem !important;
   font-weight: 600 !important;
   letter-spacing: 0.02em !important;
   color: hsl(var(--muted-foreground)) !important;
-  padding: 0 4px !important;
-  display: block !important;
+  text-transform: uppercase !important;
+  padding: 0 !important;
+  margin: 0 !important;
   transform: none !important;
 }
 
@@ -221,6 +236,7 @@
   border-bottom-color: #ef4444 !important;
 }
 
+/* TimeGrid Events (Day & Week views) */
 .fc-timegrid-event {
   overflow: hidden !important;
   min-height: 22px !important;
@@ -245,7 +261,7 @@
   z-index: 20 !important;
 }
 
-.fc .fc-event-main {
+.fc-timegrid-event .fc-event-main {
   font-weight: 500 !important;
   line-height: 1.25 !important;
   overflow: hidden !important;
@@ -258,6 +274,29 @@
   padding: 2px 6px !important;
   display: flex !important;
   align-items: center !important;
+}
+
+/* Month View (DayGrid) Events - Solid Colored Cards */
+.fc .fc-daygrid-event {
+  border-radius: 4px !important;
+  margin: 1px 2px !important;
+  padding: 1px 3px !important;
+  font-size: 0.75rem !important;
+  border-width: 1px !important;
+  cursor: pointer !important;
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.08) !important;
+}
+
+.fc .fc-daygrid-event .fc-event-main {
+  padding: 0 !important;
+  height: auto !important;
+  line-height: 1.2 !important;
+  color: #ffffff !important;
+}
+
+.fc .fc-daygrid-dot-event .fc-event-title {
+  color: #ffffff !important;
+  font-weight: 600 !important;
 }
 
 /* Mobile adjustments */
