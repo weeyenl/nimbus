@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Sparkles,
   Calculator,
@@ -9,11 +9,15 @@ import {
   DollarSign,
   Crown,
   CheckCircle,
-  HelpCircle,
+  Edit,
+  Trash2,
+  Check,
+  Package,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Card,
   CardContent,
@@ -23,6 +27,13 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -35,19 +46,165 @@ import {
   MOCK_ADDONS,
   MEMBERSHIP_TIERS,
   calculateServicePrice,
+  getServices,
+  saveService,
+  addService,
+  deleteService,
+  getAddons,
+  saveAddon,
+  addAddon,
+  deleteAddon,
   MockService,
+  MockAddon,
 } from "@/lib/mock-data";
 
 export default function ServicesPage() {
-  const [services, setServices] = useState<MockService[]>(MOCK_SERVICES);
+  const [services, setServices] = useState<MockService[]>([]);
+  const [addons, setAddons] = useState<MockAddon[]>([]);
+  const [activeTab, setActiveTab] = useState("services");
 
   // Dynamic pricing preview state
-  const [calcServiceId, setCalcServiceId] = useState("s1");
+  const [calcServiceId, setCalcServiceId] = useState("");
   const [calcSize, setCalcSize] = useState<"SMALL" | "MEDIUM" | "LARGE" | "EXTRA_LARGE">("SMALL");
   const [calcCoat, setCalcCoat] = useState("CURLY");
 
-  const calculatedRate = calculateServicePrice(calcServiceId, calcSize, calcCoat);
+  // Service Edit / Add Dialog State
+  const [isServiceModalOpen, setIsServiceModalOpen] = useState(false);
+  const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
+  const [serviceName, setServiceName] = useState("");
+  const [servicePrice, setServicePrice] = useState<number>(65);
+  const [serviceDuration, setServiceDuration] = useState<number>(60);
+  const [serviceDesc, setServiceDesc] = useState("");
+
+  // Add-on Edit / Add Dialog State
+  const [isAddonModalOpen, setIsAddonModalOpen] = useState(false);
+  const [editingAddonId, setEditingAddonId] = useState<string | null>(null);
+  const [addonName, setAddonName] = useState("");
+  const [addonPrice, setAddonPrice] = useState<number>(20);
+  const [addonDesc, setAddonDesc] = useState("");
+
+  const refreshData = () => {
+    const s = getServices();
+    const a = getAddons();
+    setServices(s);
+    setAddons(a);
+    if (!calcServiceId && s.length > 0) {
+      setCalcServiceId(s[0].id);
+    }
+  };
+
+  useEffect(() => {
+    refreshData();
+  }, []);
+
   const selectedCalcService = services.find((s) => s.id === calcServiceId) || services[0];
+  const calculatedRate = calcServiceId ? calculateServicePrice(calcServiceId, calcSize, calcCoat) : 0;
+
+  // --- SERVICE ACTIONS ---
+  const handleOpenAddService = () => {
+    setEditingServiceId(null);
+    setServiceName("");
+    setServicePrice(65);
+    setServiceDuration(60);
+    setServiceDesc("");
+    setIsServiceModalOpen(true);
+  };
+
+  const handleOpenEditService = (service: MockService) => {
+    setEditingServiceId(service.id);
+    setServiceName(service.name);
+    setServicePrice(service.basePrice);
+    setServiceDuration(service.duration);
+    setServiceDesc(service.description);
+    setIsServiceModalOpen(true);
+  };
+
+  const handleSaveService = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!serviceName.trim()) return;
+
+    if (editingServiceId) {
+      const updated: MockService = {
+        id: editingServiceId,
+        name: serviceName.trim(),
+        basePrice: Number(servicePrice) || 0,
+        price: Number(servicePrice) || 0,
+        duration: Number(serviceDuration) || 30,
+        description: serviceDesc.trim(),
+      };
+      saveService(updated);
+    } else {
+      const newService: MockService = {
+        id: `srv-${Date.now()}`,
+        name: serviceName.trim(),
+        basePrice: Number(servicePrice) || 0,
+        price: Number(servicePrice) || 0,
+        duration: Number(serviceDuration) || 30,
+        description: serviceDesc.trim(),
+      };
+      addService(newService);
+    }
+
+    refreshData();
+    setIsServiceModalOpen(false);
+  };
+
+  const handleDeleteService = (id: string, name: string) => {
+    if (confirm(`Are you sure you want to delete service "${name}"?`)) {
+      deleteService(id);
+      refreshData();
+    }
+  };
+
+  // --- ADDON ACTIONS ---
+  const handleOpenAddAddon = () => {
+    setEditingAddonId(null);
+    setAddonName("");
+    setAddonPrice(20);
+    setAddonDesc("");
+    setIsAddonModalOpen(true);
+  };
+
+  const handleOpenEditAddon = (addon: MockAddon) => {
+    setEditingAddonId(addon.id);
+    setAddonName(addon.name);
+    setAddonPrice(addon.price);
+    setAddonDesc(addon.description);
+    setIsAddonModalOpen(true);
+  };
+
+  const handleSaveAddon = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!addonName.trim()) return;
+
+    if (editingAddonId) {
+      const updated: MockAddon = {
+        id: editingAddonId,
+        name: addonName.trim(),
+        price: Number(addonPrice) || 0,
+        description: addonDesc.trim(),
+      };
+      saveAddon(updated);
+    } else {
+      const newAddon: MockAddon = {
+        id: `addon-${Date.now()}`,
+        name: addonName.trim(),
+        price: Number(addonPrice) || 0,
+        description: addonDesc.trim(),
+      };
+      addAddon(newAddon);
+    }
+
+    refreshData();
+    setIsAddonModalOpen(false);
+  };
+
+  const handleDeleteAddon = (id: string, name: string) => {
+    if (confirm(`Are you sure you want to delete add-on "${name}"?`)) {
+      deleteAddon(id);
+      refreshData();
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -61,12 +218,27 @@ export default function ServicesPage() {
             Manage catalogue, dynamic price matrix, add-ons, and club memberships
           </p>
         </div>
+
+        <div className="flex items-center gap-2">
+          {activeTab === "services" && (
+            <Button onClick={handleOpenAddService} className="gap-2">
+              <Plus className="h-4 w-4" />
+              Add Service
+            </Button>
+          )}
+          {activeTab === "addons" && (
+            <Button onClick={handleOpenAddAddon} className="gap-2">
+              <Plus className="h-4 w-4" />
+              Add Add-on
+            </Button>
+          )}
+        </div>
       </div>
 
-      <Tabs defaultValue="services" className="w-full">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="grid w-full grid-cols-3 max-w-md">
-          <TabsTrigger value="services">Services</TabsTrigger>
-          <TabsTrigger value="addons">Add-ons & Extras</TabsTrigger>
+          <TabsTrigger value="services">Services ({services.length})</TabsTrigger>
+          <TabsTrigger value="addons">Add-ons ({addons.length})</TabsTrigger>
           <TabsTrigger value="memberships">Memberships</TabsTrigger>
         </TabsList>
 
@@ -77,10 +249,10 @@ export default function ServicesPage() {
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
                 <Calculator className="h-4 w-4 text-primary" />
-                Live Dynamic Price Calculator
+                Live Dynamic Price Matrix Calculator
               </CardTitle>
               <CardDescription>
-                Test how pet size, coat type, and service combine to compute the appointment price.
+                Base service price + Size tier (+20 Med, +45 Lrg, +75 XL) + Coat modifier (+10 Curly/Double).
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -89,12 +261,12 @@ export default function ServicesPage() {
                   <Label className="text-xs">Service</Label>
                   <Select value={calcServiceId} onValueChange={setCalcServiceId}>
                     <SelectTrigger className="bg-background">
-                      <SelectValue />
+                      <SelectValue placeholder="Select service" />
                     </SelectTrigger>
                     <SelectContent>
                       {services.map((s) => (
                         <SelectItem key={s.id} value={s.id}>
-                          {s.name}
+                          {s.name} (Base ${s.basePrice})
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -111,10 +283,10 @@ export default function ServicesPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="SMALL">Small (&lt; 5kg)</SelectItem>
-                      <SelectItem value="MEDIUM">Medium (5-15kg)</SelectItem>
-                      <SelectItem value="LARGE">Large (15-30kg)</SelectItem>
-                      <SelectItem value="EXTRA_LARGE">Extra Large (&gt; 30kg)</SelectItem>
+                      <SelectItem value="SMALL">Small (&lt; 5kg, +$0)</SelectItem>
+                      <SelectItem value="MEDIUM">Medium (5-15kg, +$20)</SelectItem>
+                      <SelectItem value="LARGE">Large (15-30kg, +$45)</SelectItem>
+                      <SelectItem value="EXTRA_LARGE">Extra Large (&gt; 30kg, +$75)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -126,21 +298,21 @@ export default function ServicesPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="SHORT">Short / Smooth</SelectItem>
-                      <SelectItem value="MEDIUM">Medium</SelectItem>
-                      <SelectItem value="LONG">Long / Silky</SelectItem>
-                      <SelectItem value="DOUBLE">Double Coat (Fluffy)</SelectItem>
-                      <SelectItem value="CURLY">Curly / Wool</SelectItem>
-                      <SelectItem value="WIRE">Wire / Coarse</SelectItem>
+                      <SelectItem value="SHORT">Short / Smooth (+$0)</SelectItem>
+                      <SelectItem value="MEDIUM">Medium (+$0)</SelectItem>
+                      <SelectItem value="LONG">Long / Silky (+$0)</SelectItem>
+                      <SelectItem value="DOUBLE">Double Coat (+ $10)</SelectItem>
+                      <SelectItem value="CURLY">Curly / Wool (+ $10)</SelectItem>
+                      <SelectItem value="WIRE">Wire / Coarse (+$0)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
 
-                <div className="rounded-lg bg-background p-3 border text-center">
-                  <span className="text-xs text-muted-foreground block">Computed Price</span>
+                <div className="rounded-lg bg-background p-3 border text-center shadow-xs">
+                  <span className="text-xs text-muted-foreground block font-medium">Computed Rate</span>
                   <span className="text-2xl font-bold text-primary">${calculatedRate}</span>
                   <span className="text-[11px] text-muted-foreground block">
-                    Duration: ~{selectedCalcService.duration} mins
+                    Duration: ~{selectedCalcService?.duration || 60} mins
                   </span>
                 </div>
               </div>
@@ -150,35 +322,62 @@ export default function ServicesPage() {
           {/* Services List Grid */}
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {services.map((service) => (
-              <Card key={service.id} className="shadow-sm flex flex-col justify-between">
-                <CardHeader className="pb-2">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-base font-semibold">{service.name}</CardTitle>
-                    <span className="text-lg font-bold text-primary">${service.basePrice}</span>
-                  </div>
-                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <Clock className="h-3 w-3" />
-                    <span>Est. {service.duration} mins</span>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-3 pt-2">
-                  <p className="text-xs text-muted-foreground">{service.description}</p>
-                  <div className="rounded-md bg-muted/50 p-2 text-[11px] space-y-1">
-                    <span className="font-semibold text-foreground block">Dynamic Surcharges:</span>
-                    <div className="flex justify-between text-muted-foreground">
-                      <span>Medium Pet:</span> <span>+$20</span>
+              <Card key={service.id} className="shadow-sm flex flex-col justify-between hover:border-primary/50 transition-colors">
+                <div>
+                  <CardHeader className="pb-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <CardTitle className="text-base font-semibold">{service.name}</CardTitle>
+                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-1">
+                          <Clock className="h-3.5 w-3.5" />
+                          <span>Est. {service.duration} mins</span>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-xl font-bold text-primary">${service.basePrice}</span>
+                        <span className="text-[10px] text-muted-foreground block">Base (Small)</span>
+                      </div>
                     </div>
-                    <div className="flex justify-between text-muted-foreground">
-                      <span>Large Pet:</span> <span>+$45</span>
+                  </CardHeader>
+                  <CardContent className="space-y-3 pt-2">
+                    <p className="text-xs text-muted-foreground line-clamp-2">{service.description}</p>
+                    <div className="rounded-md bg-muted/40 p-2.5 text-[11px] space-y-1 border">
+                      <span className="font-semibold text-foreground block text-xs">Size & Coat Additions:</span>
+                      <div className="flex justify-between text-muted-foreground">
+                        <span>Medium (+5-15kg):</span> <span className="font-medium text-foreground">+$20</span>
+                      </div>
+                      <div className="flex justify-between text-muted-foreground">
+                        <span>Large (+15-30kg):</span> <span className="font-medium text-foreground">+$45</span>
+                      </div>
+                      <div className="flex justify-between text-muted-foreground">
+                        <span>Extra Large (&gt;30kg):</span> <span className="font-medium text-foreground">+$75</span>
+                      </div>
+                      <div className="flex justify-between text-muted-foreground">
+                        <span>Curly / Double Coat:</span> <span className="font-medium text-foreground">+$10</span>
+                      </div>
                     </div>
-                    <div className="flex justify-between text-muted-foreground">
-                      <span>Extra Large:</span> <span>+$75</span>
-                    </div>
-                    <div className="flex justify-between text-muted-foreground">
-                      <span>Curly/Double Coat:</span> <span>+$10</span>
-                    </div>
-                  </div>
-                </CardContent>
+                  </CardContent>
+                </div>
+
+                <div className="p-4 pt-0 border-t mt-3 flex items-center justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5 text-xs"
+                    onClick={() => handleOpenEditService(service)}
+                  >
+                    <Edit className="h-3.5 w-3.5" />
+                    Edit
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 w-8 p-0 text-destructive hover:bg-destructive/10"
+                    onClick={() => handleDeleteService(service.id, service.name)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
               </Card>
             ))}
           </div>
@@ -187,19 +386,41 @@ export default function ServicesPage() {
         {/* TAB 2: ADD-ONS & EXTRA CHARGES */}
         <TabsContent value="addons" className="space-y-4 pt-4">
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {MOCK_ADDONS.map((addon) => (
-              <Card key={addon.id} className="shadow-sm">
-                <CardHeader className="pb-2">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-base font-semibold">{addon.name}</CardTitle>
-                    <Badge variant="secondary" className="font-bold text-sm">
-                      +${addon.price}
-                    </Badge>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-xs text-muted-foreground">{addon.description}</p>
-                </CardContent>
+            {addons.map((addon) => (
+              <Card key={addon.id} className="shadow-sm flex flex-col justify-between hover:border-primary/50 transition-colors">
+                <div>
+                  <CardHeader className="pb-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <CardTitle className="text-base font-semibold">{addon.name}</CardTitle>
+                      <Badge variant="secondary" className="font-bold text-sm bg-primary/10 text-primary">
+                        +${addon.price}
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-xs text-muted-foreground">{addon.description}</p>
+                  </CardContent>
+                </div>
+
+                <div className="p-4 pt-0 border-t mt-3 flex items-center justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5 text-xs"
+                    onClick={() => handleOpenEditAddon(addon)}
+                  >
+                    <Edit className="h-3.5 w-3.5" />
+                    Edit
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 w-8 p-0 text-destructive hover:bg-destructive/10"
+                    onClick={() => handleDeleteAddon(addon.id, addon.name)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
               </Card>
             ))}
           </div>
@@ -274,6 +495,131 @@ export default function ServicesPage() {
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* SERVICE EDIT/ADD DIALOG */}
+      <Dialog open={isServiceModalOpen} onOpenChange={setIsServiceModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{editingServiceId ? "Edit Service" : "Add New Service"}</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleSaveService} className="space-y-4 pt-2">
+            <div className="space-y-2">
+              <Label htmlFor="srvName">Service Name *</Label>
+              <Input
+                id="srvName"
+                placeholder="e.g. Full Grooming"
+                value={serviceName}
+                onChange={(e) => setServiceName(e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="srvPrice">Base Price ($) *</Label>
+                <Input
+                  id="srvPrice"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={servicePrice}
+                  onChange={(e) => setServicePrice(parseFloat(e.target.value) || 0)}
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="srvDuration">Duration (Mins) *</Label>
+                <Input
+                  id="srvDuration"
+                  type="number"
+                  min="10"
+                  step="5"
+                  value={serviceDuration}
+                  onChange={(e) => setServiceDuration(parseInt(e.target.value) || 30)}
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="srvDesc">Description</Label>
+              <Textarea
+                id="srvDesc"
+                placeholder="What is included in this service..."
+                value={serviceDesc}
+                onChange={(e) => setServiceDesc(e.target.value)}
+                rows={3}
+              />
+            </div>
+
+            <DialogFooter className="pt-3 border-t">
+              <Button type="button" variant="ghost" onClick={() => setIsServiceModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" className="gap-2">
+                <Check className="h-4 w-4" />
+                {editingServiceId ? "Save Changes" : "Create Service"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* ADD-ON EDIT/ADD DIALOG */}
+      <Dialog open={isAddonModalOpen} onOpenChange={setIsAddonModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{editingAddonId ? "Edit Add-on" : "Add New Add-on"}</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleSaveAddon} className="space-y-4 pt-2">
+            <div className="space-y-2">
+              <Label htmlFor="adName">Add-on Name *</Label>
+              <Input
+                id="adName"
+                placeholder="e.g. Ayurveda Herb Spa"
+                value={addonName}
+                onChange={(e) => setAddonName(e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="adPrice">Price ($) *</Label>
+              <Input
+                id="adPrice"
+                type="number"
+                min="0"
+                step="1"
+                value={addonPrice}
+                onChange={(e) => setAddonPrice(parseFloat(e.target.value) || 0)}
+                required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="adDesc">Description</Label>
+              <Textarea
+                id="adDesc"
+                placeholder="Description of benefits..."
+                value={addonDesc}
+                onChange={(e) => setAddonDesc(e.target.value)}
+                rows={3}
+              />
+            </div>
+
+            <DialogFooter className="pt-3 border-t">
+              <Button type="button" variant="ghost" onClick={() => setIsAddonModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" className="gap-2">
+                <Check className="h-4 w-4" />
+                {editingAddonId ? "Save Changes" : "Create Add-on"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

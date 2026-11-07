@@ -669,6 +669,8 @@ const STORAGE_KEYS = {
   MEMBERSHIPS: "nimbus_memberships",
   GROOMING_RECORDS: "nimbus_grooming_records",
   PAYMENTS: "nimbus_payments",
+  SERVICES: "nimbus_services",
+  ADDONS: "nimbus_addons",
 };
 
 // 1. APPOINTMENTS
@@ -828,4 +830,107 @@ export function savePayment(payment: PaymentRecord): void {
     apt.isPaid = true;
     localStorage.setItem(STORAGE_KEYS.APPOINTMENTS, JSON.stringify(appointments));
   }
+}
+
+// 7. PET MANAGEMENT HELPERS
+export function addPetToCustomer(customerId: string, pet: MockPet): void {
+  const customers = getCustomers();
+  const cust = customers.find((c) => c.id === customerId);
+  if (cust) {
+    cust.pets = [pet, ...(cust.pets || [])];
+    localStorage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify(customers));
+  }
+}
+
+export function updatePet(petId: string, updatedData: Partial<MockPet>): void {
+  const customers = getCustomers();
+  for (const c of customers) {
+    const idx = c.pets.findIndex((p) => p.id === petId);
+    if (idx !== -1) {
+      c.pets[idx] = { ...c.pets[idx], ...updatedData };
+      break;
+    }
+  }
+  localStorage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify(customers));
+}
+
+// 8. SERVICES CATALOGUE MANAGEMENT
+export function getServices(): MockService[] {
+  if (typeof window === "undefined") return MOCK_SERVICES;
+  const stored = localStorage.getItem(STORAGE_KEYS.SERVICES);
+  if (!stored) {
+    localStorage.setItem(STORAGE_KEYS.SERVICES, JSON.stringify(MOCK_SERVICES));
+    return MOCK_SERVICES;
+  }
+  return JSON.parse(stored);
+}
+
+export function saveService(service: MockService): void {
+  const services = getServices();
+  const idx = services.findIndex((s) => s.id === service.id);
+  if (idx !== -1) {
+    services[idx] = service;
+  } else {
+    services.push(service);
+  }
+  localStorage.setItem(STORAGE_KEYS.SERVICES, JSON.stringify(services));
+}
+
+export function addService(service: MockService): void {
+  const services = getServices();
+  const updated = [...services, service];
+  localStorage.setItem(STORAGE_KEYS.SERVICES, JSON.stringify(updated));
+}
+
+export function deleteService(serviceId: string): void {
+  const services = getServices();
+  const updated = services.filter((s) => s.id !== serviceId);
+  localStorage.setItem(STORAGE_KEYS.SERVICES, JSON.stringify(updated));
+}
+
+// 9. ADD-ONS MANAGEMENT
+export function getAddons(): MockAddon[] {
+  if (typeof window === "undefined") return MOCK_ADDONS;
+  const stored = localStorage.getItem(STORAGE_KEYS.ADDONS);
+  if (!stored) {
+    localStorage.setItem(STORAGE_KEYS.ADDONS, JSON.stringify(MOCK_ADDONS));
+    return MOCK_ADDONS;
+  }
+  return JSON.parse(stored);
+}
+
+export function saveAddon(addon: MockAddon): void {
+  const addons = getAddons();
+  const idx = addons.findIndex((a) => a.id === addon.id);
+  if (idx !== -1) {
+    addons[idx] = addon;
+  } else {
+    addons.push(addon);
+  }
+  localStorage.setItem(STORAGE_KEYS.ADDONS, JSON.stringify(addons));
+}
+
+export function addAddon(addon: MockAddon): void {
+  const addons = getAddons();
+  const updated = [...addons, addon];
+  localStorage.setItem(STORAGE_KEYS.ADDONS, JSON.stringify(updated));
+}
+
+export function deleteAddon(addonId: string): void {
+  const addons = getAddons();
+  const updated = addons.filter((a) => a.id !== addonId);
+  localStorage.setItem(STORAGE_KEYS.ADDONS, JSON.stringify(updated));
+}
+
+// 10. STAFF EDIT & DELETE
+export function updateStaff(staff: MockStaff): void {
+  const current = getStaff();
+  const updated = current.map((s) => (s.id === staff.id ? staff : s));
+  localStorage.setItem(STORAGE_KEYS.STAFF, JSON.stringify(updated));
+}
+
+export function deleteStaff(staffId: string): void {
+  const current = getStaff();
+  const updated = current.filter((s) => s.id !== staffId);
+  localStorage.setItem(STORAGE_KEYS.STAFF, JSON.stringify(updated));
 }

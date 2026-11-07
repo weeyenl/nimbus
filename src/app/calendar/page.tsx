@@ -115,18 +115,40 @@ export default function CalendarPage() {
           }}
           eventContent={(arg) => {
             const props = arg.event.extendedProps;
+            const start = arg.event.start;
+            const end = arg.event.end;
+            const durationMins = start && end ? Math.round((end.getTime() - start.getTime()) / 60000) : 60;
+            const isShortSlot = durationMins <= 35;
+
+            if (isShortSlot) {
+              return (
+                <div
+                  className="flex items-center gap-1.5 px-1 py-0.5 text-[11px] leading-tight overflow-hidden w-full whitespace-nowrap"
+                  title={`${props.petName} (${props.petBreed}) - ${props.serviceName} | Groomer: ${props.groomerName}`}
+                >
+                  <span className="font-bold truncate shrink-0">{props.petName}</span>
+                  <span className="opacity-80 truncate text-[10px]">{props.serviceName}</span>
+                </div>
+              );
+            }
+
             return (
-              <div className="flex flex-col overflow-hidden p-1 text-xs">
-                <span className="font-semibold truncate">
+              <div
+                className="flex flex-col justify-start h-full p-1 text-xs overflow-hidden leading-tight"
+                title={`${props.petName} (${props.petBreed}) - ${props.serviceName} | Groomer: ${props.groomerName}`}
+              >
+                <div className="font-bold truncate text-[11px] sm:text-xs">
                   {props.petName}{" "}
                   <span className="opacity-80 font-normal">({props.petBreed})</span>
-                </span>
-                <span className="truncate opacity-95">
+                </div>
+                <div className="truncate text-[10px] sm:text-[11px] opacity-90">
                   {props.serviceName}
-                </span>
-                <span className="truncate text-[10px] opacity-80">
-                  ✂ {props.groomerName}
-                </span>
+                </div>
+                {durationMins >= 60 && (
+                  <div className="truncate text-[9.5px] opacity-80 mt-auto">
+                    ✂ {props.groomerName}
+                  </div>
+                )}
               </div>
             );
           }}

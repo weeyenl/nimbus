@@ -14,6 +14,10 @@ import {
   Clock,
   HeartPulse,
   Tag,
+  Edit,
+  Plus,
+  X,
+  Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,14 +29,50 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { getInitials } from "@/lib/utils";
 import {
   getCustomers,
   getGroomingRecords,
+  updatePet,
   MockPet,
   MockCustomer,
   GroomingRecord,
 } from "@/lib/mock-data";
+
+const COAT_TYPES = [
+  { value: "SHORT", label: "Short" },
+  { value: "MEDIUM", label: "Medium" },
+  { value: "LONG", label: "Long" },
+  { value: "DOUBLE", label: "Double Coat" },
+  { value: "WIRE", label: "Wire / Coarse" },
+  { value: "CURLY", label: "Curly / Wool" },
+];
+
+const PRESET_WARNINGS = [
+  "Bites when paws touched",
+  "Anxious with loud dryer noises",
+  "Sensitive skin / Allergies",
+  "Elderly / Hip dysplasia",
+  "Aggressive with other dogs",
+  "Cannot stand for long periods",
+  "Collapsed trachea — handle neck gently",
+];
 
 export default function PetDetailPage({ params }: { params: { id: string } }) {
   const router = useRouter();
@@ -40,7 +80,19 @@ export default function PetDetailPage({ params }: { params: { id: string } }) {
   const [owner, setOwner] = useState<MockCustomer | null>(null);
   const [records, setRecords] = useState<GroomingRecord[]>([]);
 
-  useEffect(() => {
+  // Edit Modal State
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editBreed, setEditBreed] = useState("");
+  const [editAge, setEditAge] = useState<number>(3);
+  const [editSize, setEditSize] = useState<"SMALL" | "MEDIUM" | "LARGE" | "EXTRA_LARGE">("MEDIUM");
+  const [editWeight, setEditWeight] = useState<number>(8);
+  const [editCoatType, setEditCoatType] = useState<"SHORT" | "MEDIUM" | "LONG" | "DOUBLE" | "WIRE" | "CURLY">("MEDIUM");
+  const [editVaccination, setEditVaccination] = useState("");
+  const [editWarnings, setEditWarnings] = useState<string[]>([]);
+  const [customWarning, setCustomWarning] = useState("");
+
+  const refreshPetData = () => {
     const customers = getCustomers();
     let foundPet: MockPet | null = null;
     let foundOwner: MockCustomer | null = null;
@@ -64,52 +116,134 @@ export default function PetDetailPage({ params }: { params: { id: string } }) {
     if (foundPet) {
       setRecords(getGroomingRecords(foundPet.id));
     }
+  };
+
+  useEffect(() => {
+    refreshPetData();
   }, [params.id]);
+
+  const openEditModal = () => {
+    if (!pet) return;
+    setEditName(pet.name);
+    setEditBreed(pet.breed);
+    setEditAge(pet.age);
+    setEditSize(pet.size);
+    setEditWeight(pet.weight);
+    setEditCoatType(pet.coatType);
+    setEditVaccination(pet.vaccinationExpiry || "");
+    setEditWarnings([...pet.warnings]);
+    setCustomWarning("");
+    setIsEditOpen(true);
+  };
+
+  const toggleWarning = (warning: string) => {
+    if (editWarnings.includes(warning)) {
+      setEditWarnings(editWarnings.filter((w) => w !== warning));
+    } else {
+      setEditWarnings([...editWarnings, warning]);
+    }
+  };
+
+  const addCustomWarning = () => {
+    if (customWarning.trim() && !editWarnings.includes(customWarning.trim())) {
+      setEditWarnings([...editWarnings, customWarning.trim()]);
+      setCustomWarning("");
+    }
+  };
+
+  const removeWarning = (w: string) => {
+    setEditWarnings(editWarnings.filter((item) => item !== w));
+  };
+
+  const handleSavePet = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pet) return;
+
+    const updatedData: Partial<MockPet> = {
+      name: editName.trim() || pet.name,
+      breed: editBreed.trim() || pet.breed,
+      age: Number(editAge) || 1,
+      size: editSize,
+      weight: Number(editWeight) || 5,
+      coatType: editCoatType,
+      vaccinationExpiry: editVaccination.trim() || undefined,
+      warnings: editWarnings,
+    };
+
+    updatePet(pet.id, updatedData);
+    setPet({ ...pet, ...updatedData });
+    setIsEditOpen(false);
+  };
 
   if (!pet || !owner) return null;
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" onClick={() => router.back()}>
-          <ArrowLeft className="h-5 w-5" />
-        </Button>
-        <div className="flex-1 flex items-center gap-3">
-          <Avatar className="h-14 w-14">
-            <AvatarFallback className="bg-primary/10 text-primary text-lg font-bold">
-              {getInitials(pet.name)}
-            </AvatarFallback>
-          </Avatar>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-bold tracking-tight">{pet.name}</h1>
-              {pet.warnings.length > 0 && (
-                <AlertTriangle className="h-5 w-5 text-warning" />
-              )}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="icon" onClick={() => router.back()}>
+            <ArrowLeft className="h-5 w-5" />
+          </Button>
+          <div className="flex items-center gap-3">
+            <Avatar className="h-14 w-14">
+              <AvatarFallback className="bg-primary/10 text-primary text-lg font-bold">
+                {getInitials(pet.name)}
+              </AvatarFallback>
+            </Avatar>
+            <div>
+              <div className="flex items-center gap-2">
+                <h1 className="text-2xl font-bold tracking-tight">{pet.name}</h1>
+                {pet.warnings.length > 0 && (
+                  <Badge variant="warning" className="flex items-center gap-1 font-semibold text-xs">
+                    <AlertTriangle className="h-3.5 w-3.5" />
+                    {pet.warnings.length} Alert{pet.warnings.length > 1 ? "s" : ""}
+                  </Badge>
+                )}
+              </div>
+              <p className="text-muted-foreground text-sm">
+                {pet.breed} · Owner:{" "}
+                <Link href={`/customers/${owner.id}`} className="font-semibold text-primary hover:underline">
+                  {owner.name} ({owner.phone})
+                </Link>
+              </p>
             </div>
-            <p className="text-muted-foreground text-sm">
-              {pet.breed} · Owner:{" "}
-              <Link href={`/customers/${owner.id}`} className="font-semibold text-primary hover:underline">
-                {owner.name} ({owner.phone})
-              </Link>
-            </p>
           </div>
+        </div>
+
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <Button variant="outline" className="gap-2" onClick={openEditModal}>
+            <Edit className="h-4 w-4" />
+            Edit Pet Profile
+          </Button>
+          <Link href={`/appointments/new?customerId=${owner.id}&petId=${pet.id}`}>
+            <Button className="gap-2">
+              <Scissors className="h-4 w-4" />
+              Book Appointment
+            </Button>
+          </Link>
         </div>
       </div>
 
       {/* Permanent Warning Banner */}
       {pet.warnings.length > 0 && (
         <div className="rounded-lg border-2 border-warning/40 bg-warning/10 p-4 shadow-sm">
-          <div className="flex items-center gap-2 font-semibold text-warning-foreground">
-            <AlertTriangle className="h-5 w-5" />
-            Permanent Health & Behaviour Warnings
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 font-semibold text-warning-foreground">
+              <AlertTriangle className="h-5 w-5 text-warning" />
+              Permanent Health & Behaviour Warnings
+            </div>
+            <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground hover:text-foreground" onClick={openEditModal}>
+              Manage Warnings
+            </Button>
           </div>
-          <ul className="mt-2 space-y-1">
+          <div className="mt-3 flex flex-wrap gap-2">
             {pet.warnings.map((w, idx) => (
-              <li key={idx} className="text-sm font-medium">• {w}</li>
+              <Badge key={idx} variant="warning" className="px-3 py-1 text-xs">
+                {w}
+              </Badge>
             ))}
-          </ul>
+          </div>
         </div>
       )}
 
@@ -138,7 +272,7 @@ export default function PetDetailPage({ params }: { params: { id: string } }) {
             <Calendar className="h-5 w-5 text-muted-foreground" />
             <div>
               <p className="text-xs text-muted-foreground">Age</p>
-              <p className="font-semibold text-sm">{pet.age} years</p>
+              <p className="font-semibold text-sm">{pet.age} years old</p>
             </div>
           </CardContent>
         </Card>
@@ -169,7 +303,7 @@ export default function PetDetailPage({ params }: { params: { id: string } }) {
                 <p className="text-xs text-muted-foreground">Annual booster cycle</p>
               </div>
               <Badge variant="success">
-                Expires: {pet.vaccinationExpiry}
+                Valid until: {pet.vaccinationExpiry}
               </Badge>
             </div>
           </CardContent>
@@ -189,11 +323,11 @@ export default function PetDetailPage({ params }: { params: { id: string } }) {
         <CardContent>
           {records.length === 0 ? (
             <div className="text-center py-8 text-sm text-muted-foreground">
-              No grooming records logged yet for {pet.name}.
+              No grooming records logged yet for {pet.name}. Completed appointments will log grooming styles, skin reports, and notes here.
             </div>
           ) : (
             <div className="space-y-6">
-              {records.map((record, index) => (
+              {records.map((record) => (
                 <div key={record.id} className="relative pl-6 pb-6 border-l-2 border-primary/30 last:border-l-0 last:pb-0">
                   <div className="absolute -left-2 top-0 h-4 w-4 rounded-full bg-primary" />
                   <div className="space-y-3 rounded-lg border bg-card p-4 shadow-xs">
@@ -284,6 +418,203 @@ export default function PetDetailPage({ params }: { params: { id: string } }) {
           )}
         </CardContent>
       </Card>
+
+      {/* Edit Pet Dialog */}
+      <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
+        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit Pet Profile: {pet.name}</DialogTitle>
+          </DialogHeader>
+
+          <form onSubmit={handleSavePet} className="space-y-4 pt-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="petName">Pet Name *</Label>
+                <Input
+                  id="petName"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="petBreed">Breed *</Label>
+                <Input
+                  id="petBreed"
+                  value={editBreed}
+                  onChange={(e) => setEditBreed(e.target.value)}
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="petSize">Size Category</Label>
+                <Select
+                  value={editSize}
+                  onValueChange={(val: "SMALL" | "MEDIUM" | "LARGE" | "EXTRA_LARGE") => setEditSize(val)}
+                >
+                  <SelectTrigger id="petSize">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="SMALL">Small (&lt; 10kg)</SelectItem>
+                    <SelectItem value="MEDIUM">Medium (10 - 20kg)</SelectItem>
+                    <SelectItem value="LARGE">Large (20 - 35kg)</SelectItem>
+                    <SelectItem value="EXTRA_LARGE">Extra Large (&gt; 35kg)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="petWeight">Weight (kg)</Label>
+                <Input
+                  id="petWeight"
+                  type="number"
+                  step="0.1"
+                  min="0.5"
+                  value={editWeight}
+                  onChange={(e) => setEditWeight(parseFloat(e.target.value) || 0)}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="petAge">Age (Years)</Label>
+                <Input
+                  id="petAge"
+                  type="number"
+                  min="0"
+                  max="30"
+                  value={editAge}
+                  onChange={(e) => setEditAge(parseInt(e.target.value) || 0)}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="coatType">Coat Type</Label>
+                <Select
+                  value={editCoatType}
+                  onValueChange={(val: any) => setEditCoatType(val)}
+                >
+                  <SelectTrigger id="coatType">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {COAT_TYPES.map((c) => (
+                      <SelectItem key={c.value} value={c.value}>
+                        {c.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="vaccinationExpiry">Vaccination Expiry</Label>
+                <Input
+                  id="vaccinationExpiry"
+                  type="date"
+                  value={editVaccination}
+                  onChange={(e) => setEditVaccination(e.target.value)}
+                />
+              </div>
+            </div>
+
+            {/* Permanent Warning Management */}
+            <div className="space-y-2 pt-2 border-t">
+              <Label className="flex items-center gap-1.5 text-warning-foreground font-semibold">
+                <AlertTriangle className="h-4 w-4 text-warning" />
+                Permanent Warnings & Behavioural Alerts
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Flags dangerous behaviour, anxiety, or medical restrictions for groomers before every session.
+              </p>
+
+              {/* Active Warnings */}
+              {editWarnings.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 p-2 bg-muted/30 rounded border">
+                  {editWarnings.map((w) => (
+                    <Badge
+                      key={w}
+                      variant="warning"
+                      className="gap-1 cursor-pointer hover:bg-warning/80"
+                      onClick={() => removeWarning(w)}
+                    >
+                      {w}
+                      <X className="h-3 w-3" />
+                    </Badge>
+                  ))}
+                </div>
+              )}
+
+              {/* Preset Quick-Add buttons */}
+              <div className="space-y-1 pt-1">
+                <span className="text-xs font-medium text-muted-foreground">Common Presets (Click to toggle):</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {PRESET_WARNINGS.map((w) => {
+                    const isSelected = editWarnings.includes(w);
+                    return (
+                      <button
+                        key={w}
+                        type="button"
+                        onClick={() => toggleWarning(w)}
+                        className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                          isSelected
+                            ? "bg-warning/20 border-warning text-warning-foreground font-semibold"
+                            : "bg-background hover:bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        {isSelected ? "✓ " : "+ "}
+                        {w}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Custom Warning Input */}
+              <div className="flex gap-2 pt-2">
+                <Input
+                  placeholder="Or type custom warning..."
+                  value={customWarning}
+                  onChange={(e) => setCustomWarning(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addCustomWarning();
+                    }
+                  }}
+                  className="text-xs"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={addCustomWarning}
+                  className="gap-1 text-xs whitespace-nowrap"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Add Tag
+                </Button>
+              </div>
+            </div>
+
+            <DialogFooter className="pt-4 border-t gap-2 sm:gap-0">
+              <Button type="button" variant="ghost" onClick={() => setIsEditOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" className="gap-2">
+                <Check className="h-4 w-4" />
+                Save Changes
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
