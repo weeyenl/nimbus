@@ -98,6 +98,30 @@ export default function CalendarPage() {
           }}
           slotMinTime="08:00:00"
           slotMaxTime="20:00:00"
+          slotDuration="00:30:00"
+          slotLabelInterval="01:00:00"
+          slotLabelFormat={{
+            hour: "numeric",
+            minute: "2-digit",
+            meridiem: "short",
+            hour12: true,
+          }}
+          slotLabelContent={(arg) => {
+            const date = arg.date;
+            const hours = date.getHours();
+            const ampm = hours >= 12 ? "PM" : "AM";
+            const displayHour = hours % 12 || 12;
+            return (
+              <div className="flex items-baseline justify-end gap-1 px-1.5 select-none pt-0.5">
+                <span className="font-semibold text-[11px] text-slate-600 dark:text-slate-300 tabular-nums">
+                  {displayHour}:00
+                </span>
+                <span className="font-medium text-[9px] text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                  {ampm}
+                </span>
+              </div>
+            );
+          }}
           allDaySlot={false}
           nowIndicator={true}
           editable={true}
@@ -135,30 +159,35 @@ export default function CalendarPage() {
             if (isShortSlot) {
               return (
                 <div
-                  className="flex items-center gap-1.5 px-1 py-0.5 text-[11px] leading-tight overflow-hidden w-full whitespace-nowrap"
+                  className="flex items-center gap-1.5 text-xs font-medium leading-none overflow-hidden w-full whitespace-nowrap"
                   title={`${props.petName} (${props.petBreed}) - ${props.serviceName} | Groomer: ${props.groomerName}`}
                 >
-                  <span className="font-bold truncate shrink-0">{props.petName}</span>
-                  <span className="opacity-80 truncate text-[10px]">{props.serviceName}</span>
+                  <span className="font-semibold truncate shrink-0">{props.petName}</span>
+                  <span className="opacity-80 truncate text-[10.5px]">· {props.serviceName}</span>
                 </div>
               );
             }
 
             return (
               <div
-                className="flex flex-col justify-start h-full p-1 text-xs overflow-hidden leading-tight"
+                className="flex flex-col justify-start h-full text-xs overflow-hidden leading-tight"
                 title={`${props.petName} (${props.petBreed}) - ${props.serviceName} | Groomer: ${props.groomerName}`}
               >
-                <div className="font-bold truncate text-[11px] sm:text-xs">
-                  {props.petName}{" "}
-                  <span className="opacity-80 font-normal">({props.petBreed})</span>
+                <div className="flex items-center justify-between gap-1">
+                  <span className="font-bold truncate text-[11.5px] sm:text-xs tracking-tight">
+                    {props.petName}
+                  </span>
+                  <span className="opacity-80 font-normal text-[10px] shrink-0 truncate">
+                    {props.petBreed}
+                  </span>
                 </div>
-                <div className="truncate text-[10px] sm:text-[11px] opacity-90">
+                <div className="truncate text-[10.5px] font-medium opacity-90 mt-0.5">
                   {props.serviceName}
                 </div>
                 {durationMins >= 60 && (
-                  <div className="truncate text-[9.5px] opacity-80 mt-auto">
-                    ✂ {props.groomerName}
+                  <div className="flex items-center gap-1 text-[10px] opacity-80 mt-auto pt-1 border-t border-white/20">
+                    <span>✂</span>
+                    <span className="truncate font-medium">{props.groomerName}</span>
                   </div>
                 )}
               </div>
