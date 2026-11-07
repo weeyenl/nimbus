@@ -2,21 +2,23 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
-import { Plus, Search, Phone, ChevronRight, PawPrint } from "lucide-react";
+import { Plus, Search, Phone, ChevronRight, PawPrint, Crown, CreditCard } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { getInitials } from "@/lib/utils";
-import { getCustomers, MockCustomer } from "@/lib/mock-data";
+import { getCustomers, getMemberships, MockCustomer, CustomerMembership } from "@/lib/mock-data";
 
 export default function CustomersPage() {
   const [customers, setCustomers] = useState<MockCustomer[]>([]);
+  const [memberships, setMemberships] = useState<CustomerMembership[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
     setCustomers(getCustomers());
+    setMemberships(getMemberships());
   }, []);
 
   const filtered = customers.filter(
@@ -34,10 +36,10 @@ export default function CustomersPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight md:text-3xl">
-            Customers
+            Customers & Packages
           </h1>
           <p className="text-muted-foreground">
-            Manage pet owners and their registered pets
+            Manage pet owners, registered pets, and membership credit packages
           </p>
         </div>
         <Button asChild size="sm">
@@ -76,37 +78,61 @@ export default function CustomersPage() {
             </CardContent>
           </Card>
         ) : (
-          filtered.map((customer) => (
-            <Link key={customer.id} href={`/customers/${customer.id}`}>
-              <Card className="transition-colors hover:bg-accent/50 shadow-sm">
-                <CardContent className="flex items-center gap-4 p-4">
-                  <Avatar className="h-12 w-12">
-                    <AvatarFallback className="bg-primary/10 text-primary font-semibold">
-                      {getInitials(customer.name)}
-                    </AvatarFallback>
-                  </Avatar>
+          filtered.map((customer) => {
+            const mem = memberships.find((m) => m.customerId === customer.id);
+            return (
+              <Link key={customer.id} href={`/customers/${customer.id}`}>
+                <Card className="transition-colors hover:bg-accent/50 shadow-sm">
+                  <CardContent className="flex items-center gap-4 p-4">
+                    <Avatar className="h-12 w-12 shrink-0">
+                      <AvatarFallback className="bg-primary/10 text-primary font-semibold">
+                        {getInitials(customer.name)}
+                      </AvatarFallback>
+                    </Avatar>
 
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold truncate">{customer.name}</p>
-                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-0.5">
-                      <Phone className="h-3 w-3" />
-                      <span>{customer.phone}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="font-semibold truncate">{customer.name}</p>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-0.5">
+                        <Phone className="h-3 w-3 shrink-0" />
+                        <span>{customer.phone}</span>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {customer.pets.map((pet) => (
+                          <Badge key={pet.id} variant="secondary" className="text-xs font-normal">
+                            <PawPrint className="mr-1 h-3 w-3 text-primary" />
+                            {pet.name} ({pet.breed})
+                          </Badge>
+                        ))}
+                      </div>
                     </div>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {customer.pets.map((pet) => (
-                        <Badge key={pet.id} variant="secondary" className="text-xs font-normal">
-                          <PawPrint className="mr-1 h-3 w-3 text-primary" />
-                          {pet.name} ({pet.breed})
+
+                    {/* Membership & Credit Balance Pill */}
+                    {mem ? (
+                      <div className="text-right shrink-0 hidden sm:block">
+                        <Badge variant="outline" className="text-xs gap-1 border-primary/40 bg-primary/5 text-primary font-semibold">
+                          <Crown className="h-3 w-3 text-amber-500" />
+                          {mem.displayName.replace(" Membership", "")}
                         </Badge>
-                      ))}
-                    </div>
-                  </div>
+                        <div className="text-xs font-bold text-foreground mt-1">
+                          ${mem.remainingCredits} <span className="text-[10px] text-muted-foreground font-normal">credits</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-right shrink-0 hidden sm:block">
+                        <span className="text-[11px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                          No Package
+                        </span>
+                      </div>
+                    )}
 
-                  <ChevronRight className="h-5 w-5 text-muted-foreground" />
-                </CardContent>
-              </Card>
-            </Link>
-          ))
+                    <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0" />
+                  </CardContent>
+                </Card>
+              </Link>
+            );
+          })
         )}
       </div>
     </div>

@@ -788,6 +788,52 @@ export function deductMembershipCredits(customerId: string, credits: number): bo
   return true;
 }
 
+export function updateCustomerMembership(
+  customerId: string,
+  updates: Partial<CustomerMembership>
+): CustomerMembership | undefined {
+  const memberships = getMemberships();
+  const idx = memberships.findIndex((m) => m.customerId === customerId);
+  if (idx === -1) return undefined;
+
+  memberships[idx] = { ...memberships[idx], ...updates };
+  localStorage.setItem(STORAGE_KEYS.MEMBERSHIPS, JSON.stringify(memberships));
+  return memberships[idx];
+}
+
+export function adjustCustomerMembershipCredits(
+  customerId: string,
+  newRemainingCredits: number,
+  newTotalCredits?: number
+): CustomerMembership | undefined {
+  const memberships = getMemberships();
+  const idx = memberships.findIndex((m) => m.customerId === customerId);
+  if (idx === -1) return undefined;
+
+  memberships[idx].remainingCredits = Math.max(0, newRemainingCredits);
+  if (typeof newTotalCredits === "number" && newTotalCredits > 0) {
+    memberships[idx].totalCredits = Math.max(newTotalCredits, memberships[idx].remainingCredits);
+  }
+  localStorage.setItem(STORAGE_KEYS.MEMBERSHIPS, JSON.stringify(memberships));
+  return memberships[idx];
+}
+
+export function deductPackageAddonAllowance(
+  customerId: string,
+  allowanceId: string
+): CustomerMembership | undefined {
+  const memberships = getMemberships();
+  const idx = memberships.findIndex((m) => m.customerId === customerId);
+  if (idx === -1 || !memberships[idx].bonusAllowances) return undefined;
+
+  const allowance = memberships[idx].bonusAllowances.find((a) => a.id === allowanceId);
+  if (!allowance || allowance.remaining <= 0) return undefined;
+
+  allowance.remaining -= 1;
+  localStorage.setItem(STORAGE_KEYS.MEMBERSHIPS, JSON.stringify(memberships));
+  return memberships[idx];
+}
+
 // 5. GROOMING RECORDS
 export function getGroomingRecords(petId?: string): GroomingRecord[] {
   if (typeof window === "undefined") return INITIAL_GROOMING_RECORDS;

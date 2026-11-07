@@ -21,6 +21,7 @@ import {
   Printer,
   Crown,
   HeartPulse,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -59,6 +60,7 @@ import {
   saveAppointment,
   getCustomerMembership,
   deductMembershipCredits,
+  deductPackageAddonAllowance,
   getGroomingRecords,
   saveGroomingRecord,
   getPayments,
@@ -107,7 +109,9 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
 
   // Price adjustment
   const [customPrice, setCustomPrice] = useState<number>(85);
-  const [selectedAddons, setSelectedAddons] = useState<{ id: string; name: string; price: number }[]>([]);
+  const [selectedAddons, setSelectedAddons] = useState<
+    { id: string; name: string; price: number; packageAllowanceId?: string }[]
+  >([]);
 
   // Grooming Record Form state
   const [haircutStyle, setHaircutStyle] = useState("");
@@ -181,6 +185,25 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
     saveAppointment(apt);
   }
 
+  function handleAddPackageVoucher(allowanceId: string, allowanceName: string) {
+    if (!apt) return;
+    const voucherId = `pkg_${allowanceId}`;
+    if (selectedAddons.some((a) => a.id === voucherId)) return;
+
+    const updated = [
+      ...selectedAddons,
+      {
+        id: voucherId,
+        name: `${allowanceName} (Free Package Voucher)`,
+        price: 0,
+        packageAllowanceId: allowanceId,
+      },
+    ];
+    setSelectedAddons(updated);
+    apt.addOns = updated;
+    saveAppointment(apt);
+  }
+
   function handleRemoveAddon(addonId: string) {
     if (!apt) return;
     const updated = selectedAddons.filter((a) => a.id !== addonId);
@@ -230,6 +253,14 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
       }
       deductMembershipCredits(apt.customerId, grandTotal);
     }
+
+    // Deduct any redeemed package add-on vouchers
+    for (const addon of selectedAddons) {
+      if (addon.packageAllowanceId) {
+        deductPackageAddonAllowance(apt.customerId, addon.packageAllowanceId);
+      }
+    }
+    setMembership(getCustomerMembership(apt.customerId));
 
     const newPayment: PaymentRecord = {
       id: `pay_${Date.now()}`,
@@ -457,6 +488,49 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
               </div>
             </div>
 
+            {/* Package Vouchers Available */}
+            {membership?.bonusAllowances && membership.bonusAllowances.some((b) => b.remaining > 0) && (
+              <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-primary flex items-center gap-1.5">
+                    <Sparkles className="h-3.5 w-3.5 text-amber-500" />
+                    Available {membership.displayName} Add-on Vouchers
+                  </span>
+                  <span className="text-[10px] text-muted-foreground font-medium">Billed at $0</span>
+                </div>
+                <div className="space-y-1.5">
+                  {membership.bonusAllowances
+                    .filter((b) => b.remaining > 0)
+                    .map((allowance) => {
+                      const isAdded = selectedAddons.some((a) => a.id === `pkg_${allowance.id}`);
+                      return (
+                        <div
+                          key={allowance.id}
+                          className="flex items-center justify-between text-xs bg-background p-2 rounded border"
+                        >
+                          <div>
+                            <span className="font-semibold block">{allowance.name}</span>
+                            <span className="text-[10px] text-muted-foreground">
+                              {allowance.remaining} of {allowance.total} vouchers available
+                            </span>
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={isAdded ? "secondary" : "default"}
+                            className="h-7 text-xs gap-1 font-semibold"
+                            disabled={isAdded}
+                            onClick={() => handleAddPackageVoucher(allowance.id, allowance.name)}
+                          >
+                            {isAdded ? "✓ Added (Free)" : "+ Redeem ($0)"}
+                          </Button>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            )}
+
             {/* Selected Add-ons */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
@@ -483,9 +557,16 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
               ) : (
                 selectedAddons.map((addon) => (
                   <div key={addon.id} className="flex items-center justify-between text-xs rounded-md bg-muted/60 p-2">
-                    <span>{addon.name}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span>{addon.name}</span>
+                      {addon.price === 0 && (
+                        <Badge variant="success" className="text-[10px] py-0 px-1.5">
+                          Free Voucher
+                        </Badge>
+                      )}
+                    </div>
                     <div className="flex items-center gap-2">
-                      <span className="font-semibold">+${addon.price}</span>
+                      <span className="font-semibold">{addon.price === 0 ? "$0" : `+$${addon.price}`}</span>
                       <Button
                         variant="ghost"
                         size="icon"
