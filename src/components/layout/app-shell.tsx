@@ -118,9 +118,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     let cancelled = false;
     setPhase("loading");
     (async () => {
+      // Check if logged in via PIN or Supabase session
+      const hasPinAuth = Boolean(localStorage.getItem("nimbus_active_staff_id"));
       const { data } = await supabase.auth.getSession();
       const user = data.session?.user;
-      if (!user) {
+
+      if (!user && !hasPinAuth) {
         router.replace("/login");
         return;
       }
@@ -140,14 +143,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       const allStaff = getStaff();
       const pinStaff = activeStaffId ? allStaff.find((s) => s.id === activeStaffId) : undefined;
 
-      const email = user.email || "";
-      const staffMatch = pinStaff || allStaff.find((s) => s.email?.toLowerCase() === email.toLowerCase());
-      const metaRole = (user.user_metadata?.role || user.app_metadata?.role) as UserRole | undefined;
+      const email = user?.email || "";
+      const staffMatch = pinStaff || (email ? allStaff.find((s) => s.email?.toLowerCase() === email.toLowerCase()) : undefined);
+      const metaRole = (user?.user_metadata?.role || user?.app_metadata?.role) as UserRole | undefined;
       const role: UserRole =
         (staffMatch?.role as UserRole | undefined) ||
         (metaRole && ["OWNER", "RECEPTIONIST", "GROOMER"].includes(metaRole) ? metaRole : "OWNER");
       
-      setUserEmail(staffMatch ? `${staffMatch.name} (${staffMatch.role})` : email);
+      setUserEmail(staffMatch ? `${staffMatch.name} (${staffMatch.role})` : (email || "Staff Member"));
       setCurrentRole(role);
       setPhase("ready");
     })();

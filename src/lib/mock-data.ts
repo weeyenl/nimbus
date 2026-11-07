@@ -503,7 +503,6 @@ export const MOCK_STAFF_DATA: MockStaff[] = [
     role: "GROOMER",
     phone: "+65 9111 2222",
     email: "amy@doglab.com",
-    pin: "1111",
     isActive: true,
     schedule: {
       Mon: "09:00-18:00",
@@ -521,7 +520,6 @@ export const MOCK_STAFF_DATA: MockStaff[] = [
     role: "GROOMER",
     phone: "+65 9222 3333",
     email: "ben@doglab.com",
-    pin: "2222",
     isActive: true,
     schedule: {
       Mon: "09:00-18:00",
@@ -539,7 +537,6 @@ export const MOCK_STAFF_DATA: MockStaff[] = [
     role: "RECEPTIONIST",
     phone: "+65 9333 4444",
     email: "cindy@doglab.com",
-    pin: "3333",
     isActive: true,
     schedule: {
       Mon: "09:00-18:00",
@@ -720,8 +717,8 @@ function readCache<T>(key: string): T[] | null {
 function readCollection<T>(key: string, demoDefaults: T[]): T[] {
   if (typeof window === "undefined") return isSupabaseConfigured ? [] : demoDefaults;
   const cached = readCache<T>(key);
-  if (cached) return cached;
-  if (isSupabaseConfigured) return []; // real data arrives via hydrateFromCloud()
+  if (cached && cached.length > 0) return cached;
+  // If Supabase is configured but this browser cache hasn't hydrated or is empty, use defaults so PINs work immediately
   localStorage.setItem(key, JSON.stringify(demoDefaults));
   return demoDefaults;
 }
@@ -792,15 +789,17 @@ export async function hydrateFromCloud(): Promise<void> {
 
   const byKey = new Map<string, unknown[]>(loaded);
 
-  // First run on an empty database: start with the default service & add-on catalogue.
+  // First run on an empty database: start with the default services, add-ons, and staff.
   if (
     byKey.get(STORAGE_KEYS.SERVICES)!.length === 0 &&
     byKey.get(STORAGE_KEYS.ADDONS)!.length === 0 &&
+    byKey.get(STORAGE_KEYS.STAFF)!.length === 0 &&
     !localStorage.getItem("nimbus_catalogue_seeded")
   ) {
     for (const [key, defaults] of [
       [STORAGE_KEYS.SERVICES, MOCK_SERVICES],
       [STORAGE_KEYS.ADDONS, MOCK_ADDONS],
+      [STORAGE_KEYS.STAFF, MOCK_STAFF_DATA],
     ] as const) {
       const { error } = await supabase
         .from(tableOf(key))

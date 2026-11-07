@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { PawPrint, Lock, Mail, ArrowRight, KeyRound, Delete } from "lucide-react";
+import { PawPrint, Lock, Mail, ArrowRight, KeyRound, Delete, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,7 +14,7 @@ import {
   CardDescription,
   CardFooter,
 } from "@/components/ui/card";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { getStaff, MockStaff } from "@/lib/mock-data";
 
@@ -26,6 +26,7 @@ export default function LoginPage() {
   const [pin, setPin] = useState("");
   const [pinError, setPinError] = useState("");
   const [staffMembers, setStaffMembers] = useState<MockStaff[]>([]);
+  const [pinLoading, setPinLoading] = useState(false);
 
   // Email login state
   const [email, setEmail] = useState("");
@@ -34,11 +35,27 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    setStaffMembers(getStaff());
-    if (!isSupabaseConfigured) return;
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session) router.replace("/");
-    });
+    // 1. Initial staff from local storage
+    const localList = getStaff();
+    setStaffMembers(localList);
+
+    // 2. Fetch latest staff from Supabase (to guarantee custom PINs are up to date)
+    if (isSupabaseConfigured) {
+      supabase
+        .from("staff")
+        .select("id,data")
+        .then(({ data, error }) => {
+          if (!error && data && data.length > 0) {
+            const cloudStaff = data.map((r: any) => r.data as MockStaff);
+            setStaffMembers(cloudStaff);
+            localStorage.setItem("nimbus_staff", JSON.stringify(cloudStaff));
+          }
+        });
+
+      supabase.auth.getSession().then(({ data }) => {
+        if (data.session) router.replace("/");
+      });
+    }
   }, [router]);
 
   // Handle PIN button click
@@ -47,9 +64,6 @@ export default function LoginPage() {
       const nextPin = pin + digit;
       setPin(nextPin);
       setPinError("");
-      if (nextPin.length >= 4) {
-        verifyPin(nextPin);
-      }
     }
   };
 
@@ -63,17 +77,23 @@ export default function LoginPage() {
     setPinError("");
   };
 
-  const verifyPin = (candidatePin: string) => {
-    const matched = staffMembers.find((s) => s.pin === candidatePin && s.isActive !== false);
+  const handlePinSubmit = () => {
+    if (pin.length < 4) {
+      setPinError("Please enter at least 4 digits");
+      return;
+    }
+
+    setPinLoading(true);
+    const staffList = staffMembers.length > 0 ? staffMembers : getStaff();
+    const matched = staffList.find((s) => s.pin === pin && s.isActive !== false);
+
     if (matched) {
       localStorage.setItem("nimbus_active_staff_id", matched.id);
       localStorage.setItem("nimbus_current_role", matched.role);
       router.push("/");
-    } else if (candidatePin.length >= 4) {
-      // Allow user to keep typing if 4 digits didn't match and they have a 5 or 6 digit PIN
-      if (candidatePin.length === 6 || !staffMembers.some((s) => s.pin?.startsWith(candidatePin))) {
-        setPinError("Invalid Staff PIN code");
-      }
+    } else {
+      setPinLoading(false);
+      setPinError("Invalid Staff PIN code");
     }
   };
 
@@ -128,7 +148,7 @@ export default function LoginPage() {
             <div className="space-y-4">
               {/* PIN Display Dots */}
               <div className="text-center space-y-2">
-                <Label className="text-xs text-muted-foreground">Enter 4-6 Digit Salon PIN</Label>
+                <Label className="text-xs text-muted-foreground">Enter 4-6 Digit Staff PIN</Label>
                 <div className="flex justify-center items-center gap-2.5 h-10">
                   {[0, 1, 2, 3, 4, 5].map((i) => (
                     <div
@@ -141,7 +161,7 @@ export default function LoginPage() {
                     />
                   ))}
                 </div>
-                {pinError && <p className="text-xs font-medium text-destructive pt-1">{pinError}</p>}
+                {pinError && <p className="text-xs font-medium text-destructive pt-0.5">{pinError}</p>}
               </div>
 
               {/* Numeric Keypad */}
@@ -184,10 +204,16 @@ export default function LoginPage() {
                 </Button>
               </div>
 
-              <div className="text-center pt-2">
-                <p className="text-[11px] text-muted-foreground">
-                  Default Demo PINs: Amy (<code className="font-semibold text-foreground">1111</code>), Ben (<code className="font-semibold text-foreground">2222</code>), Cindy (<code className="font-semibold text-foreground">3333</code>)
-                </p>
+              {/* Explicit Login / OK button */}
+              <div className="max-w-[280px] mx-auto pt-2">
+                <Button
+                  type="button"
+                  className="w-full h-11 text-sm font-semibold gap-2 rounded-xl"
+                  onClick={handlePinSubmit}
+                  disabled={pin.length < 4 || pinLoading}
+                >
+                  {pinLoading ? "Signing in..." : "Login with PIN"} <ArrowRight className="h-4 w-4" />
+                </Button>
               </div>
             </div>
           ) : (
