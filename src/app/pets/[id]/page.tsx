@@ -106,10 +106,7 @@ export default function PetDetailPage({ params }: { params: { id: string } }) {
       }
     }
 
-    if (!foundPet && customers[0]?.pets[0]) {
-      foundPet = customers[0].pets[0];
-      foundOwner = customers[0];
-    }
+    // Never substitute another customer's pet when the id is unknown
 
     setPet(foundPet);
     setOwner(foundOwner);

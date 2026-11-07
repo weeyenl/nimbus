@@ -1,5 +1,8 @@
-// Shared mock data store with state management for prototype demo
+// Shared data store. Runs on browser-local mock data in demo mode, or syncs to
+// Supabase when NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY are set.
 // Covers V1.1 (Booking & Customers) and V1.2 (Pricing, Memberships, Grooming Records, Payments & Reports)
+
+import { supabase, isSupabaseConfigured } from "./supabase";
 
 export interface MockAppointment {
   id: string;
@@ -63,10 +66,13 @@ export interface MockCustomer {
 export interface MockService {
   id: string;
   name: string;
+  category?: string;
   duration: number; // in mins
   basePrice: number;
   price: number;
   description: string;
+  /** Fixed price: no pet size / coat surcharges (training, daycare, custom services). */
+  flatRate?: boolean;
 }
 
 export interface MockAddon {
@@ -144,11 +150,18 @@ export interface PaymentRecord {
   status: "PAID" | "PENDING";
 }
 
-// Date helpers
+// Date helpers (local time — toISOString() is UTC and gives the wrong day in Singapore before 8am)
+export function localDateStr(d: Date = new Date()): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 function getTodayOffsetStr(daysOffset: number = 0): string {
   const d = new Date();
   d.setDate(d.getDate() + daysOffset);
-  return d.toISOString().split("T")[0];
+  return localDateStr(d);
 }
 
 const todayStr = getTodayOffsetStr(0);
@@ -157,14 +170,16 @@ const yesterdayStr = getTodayOffsetStr(-1);
 
 // 1. SERVICES CATALOGUE
 export const MOCK_SERVICES: MockService[] = [
-  { id: "s1", name: "Full Grooming", duration: 120, basePrice: 85, price: 85, description: "Full styling, bath, fluff dry, sanitary shave, paw pads, ear cleaning, and nail trim." },
-  { id: "s2", name: "Basic Grooming", duration: 75, basePrice: 55, price: 55, description: "Bath, fluff dry, sanitary clip, paw pad trim, nail clipping, and ear cleaning." },
-  { id: "s3", name: "Shower Only", duration: 45, basePrice: 35, price: 35, description: "Gentle shampoo bath and thorough blow dry." },
-  { id: "s4", name: "Express Grooming", duration: 60, basePrice: 95, price: 95, description: "Fast turnaround, single-groomer dedicated priority session." },
-  { id: "s5", name: "Medicated Treatment", duration: 45, basePrice: 50, price: 50, description: "Specialized anti-bacterial or soothing medicated soak for skin issues." },
-  { id: "s6", name: "Nail Trim", duration: 15, basePrice: 15, price: 15, description: "Clipping and smoothing edges." },
-  { id: "s7", name: "Teeth Cleaning", duration: 20, basePrice: 25, price: 25, description: "Ultrasonic / oral brushing and fresh breath gel." },
-  { id: "s8", name: "De-shedding", duration: 60, basePrice: 65, price: 65, description: "High-velocity undercoat blowout and thorough brush out." },
+  { id: "s1", name: "Full Grooming", category: "Grooming", duration: 120, basePrice: 85, price: 85, description: "Full styling, bath, fluff dry, sanitary shave, paw pads, ear cleaning, and nail trim." },
+  { id: "s2", name: "Basic Grooming", category: "Grooming", duration: 75, basePrice: 55, price: 55, description: "Bath, fluff dry, sanitary clip, paw pad trim, nail clipping, and ear cleaning." },
+  { id: "s3", name: "Shower Only", category: "Grooming", duration: 45, basePrice: 35, price: 35, description: "Gentle shampoo bath and thorough blow dry." },
+  { id: "s4", name: "Express Grooming", category: "Grooming", duration: 60, basePrice: 95, price: 95, description: "Fast turnaround, single-groomer dedicated priority session." },
+  { id: "s5", name: "Medicated Treatment", category: "Spa & Treatment", duration: 45, basePrice: 50, price: 50, description: "Specialized anti-bacterial or soothing medicated soak for skin issues." },
+  { id: "s6", name: "Nail Trim", category: "Hygiene & Maintenance", duration: 15, basePrice: 15, price: 15, description: "Clipping and smoothing edges." },
+  { id: "s7", name: "Teeth Cleaning", category: "Hygiene & Maintenance", duration: 20, basePrice: 25, price: 25, description: "Ultrasonic / oral brushing and fresh breath gel." },
+  { id: "s8", name: "De-shedding", category: "Grooming", duration: 60, basePrice: 65, price: 65, description: "High-velocity undercoat blowout and thorough brush out." },
+  { id: "s9", name: "Puppy Basic Obedience & Socialization", category: "Training & Behavior", duration: 60, basePrice: 120, price: 120, description: "Core commands (sit, down, stay, recall), loose-leash walking, and puppy socialization." },
+  { id: "s10", name: "1-on-1 Behavioral Consultation", category: "Training & Behavior", duration: 90, basePrice: 160, price: 160, description: "Private coaching for anxiety, reactivity, excessive barking, or grooming desensitization." },
 ];
 
 // 2. ADD-ONS LIST
@@ -184,8 +199,14 @@ export function calculateServicePrice(
   petSize: "SMALL" | "MEDIUM" | "LARGE" | "EXTRA_LARGE" = "SMALL",
   coatType: string = "SHORT"
 ): number {
-  const service = MOCK_SERVICES.find((s) => s.id === serviceId) || MOCK_SERVICES[0];
+  const services = typeof window !== "undefined" ? getServices() : MOCK_SERVICES;
+  const service = services.find((s) => s.id === serviceId) || services[0] || MOCK_SERVICES[0];
   let price = service.basePrice;
+
+  // Fixed-price services (e.g. Training, Daycare, custom) have no size/coat surcharges
+  if (isFlatRate(service)) {
+    return price;
+  }
 
   // Small is base
   if (petSize === "MEDIUM") price += 20;
@@ -193,7 +214,7 @@ export function calculateServicePrice(
   if (petSize === "EXTRA_LARGE") price += 75;
 
   // Coat difficulty modifier (curly, long, double take longer)
-  if (["CURLY", "LONG", "DOUBLE"].includes(coatType) && ["s1", "s2", "s8"].includes(serviceId)) {
+  if (["CURLY", "LONG", "DOUBLE"].includes(coatType) && (!service.category || service.category === "Grooming")) {
     price += 10;
   }
 
@@ -673,72 +694,166 @@ const STORAGE_KEYS = {
   ADDONS: "nimbus_addons",
 };
 
+// ---------------------------------------------------------------------------
+// STORAGE LAYER
+// localStorage is a synchronous cache that every page reads from. When Supabase
+// is configured, every write is also pushed to the cloud (one table per
+// collection, rows are { id, data jsonb }) and hydrateFromCloud() refills the
+// cache from the database on app start. Without Supabase env vars the app runs
+// in demo mode on mock data stored only in this browser.
+// ---------------------------------------------------------------------------
+const tableOf = (key: string) => key.replace("nimbus_", "");
+
+function readCache<T>(key: string): T[] | null {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+function readCollection<T>(key: string, demoDefaults: T[]): T[] {
+  if (typeof window === "undefined") return isSupabaseConfigured ? [] : demoDefaults;
+  const cached = readCache<T>(key);
+  if (cached) return cached;
+  if (isSupabaseConfigured) return []; // real data arrives via hydrateFromCloud()
+  localStorage.setItem(key, JSON.stringify(demoDefaults));
+  return demoDefaults;
+}
+
+let syncChain: Promise<void> = Promise.resolve();
+
+function reportSyncError(message: string) {
+  console.error("[nimbus] cloud sync failed:", message);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("nimbus-sync-error", { detail: message }));
+  }
+}
+
+function commit<T extends { id: string }>(key: string, next: T[]): void {
+  const prev = readCache<T>(key) ?? [];
+  localStorage.setItem(key, JSON.stringify(next));
+  if (!isSupabaseConfigured) return;
+
+  const prevJson = new Map(prev.map((r) => [r.id, JSON.stringify(r)]));
+  const upserts = next
+    .filter((r) => prevJson.get(r.id) !== JSON.stringify(r))
+    .map((r) => ({ id: r.id, data: r }));
+  const nextIds = new Set(next.map((r) => r.id));
+  const deletes = prev.filter((r) => !nextIds.has(r.id)).map((r) => r.id);
+  if (upserts.length === 0 && deletes.length === 0) return;
+
+  const table = tableOf(key);
+  syncChain = syncChain.then(async () => {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let failure: string | null = null;
+      if (upserts.length) {
+        const { error } = await supabase.from(table).upsert(upserts);
+        if (error) failure = `${table}: ${error.message}`;
+      }
+      if (!failure && deletes.length) {
+        const { error } = await supabase.from(table).delete().in("id", deletes);
+        if (error) failure = `${table}: ${error.message}`;
+      }
+      if (!failure) return;
+      if (attempt === 1) reportSyncError(failure);
+    }
+  });
+}
+
+/** Loads all collections from Supabase into the local cache. Throws on failure. */
+export async function hydrateFromCloud(): Promise<void> {
+  if (!isSupabaseConfigured) return;
+
+  const loaded = await Promise.all(
+    Object.values(STORAGE_KEYS).map(async (key) => {
+      const table = tableOf(key);
+      const rows: unknown[] = [];
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await supabase
+          .from(table)
+          .select("id,data")
+          .order("id")
+          .range(from, from + 999);
+        if (error) throw new Error(`${table}: ${error.message}`);
+        rows.push(...(data || []).map((r: { data: unknown }) => r.data));
+        if (!data || data.length < 1000) break;
+      }
+      return [key, rows] as const;
+    })
+  );
+
+  const byKey = new Map<string, unknown[]>(loaded);
+
+  // First run on an empty database: start with the default service & add-on catalogue.
+  if (
+    byKey.get(STORAGE_KEYS.SERVICES)!.length === 0 &&
+    byKey.get(STORAGE_KEYS.ADDONS)!.length === 0 &&
+    !localStorage.getItem("nimbus_catalogue_seeded")
+  ) {
+    for (const [key, defaults] of [
+      [STORAGE_KEYS.SERVICES, MOCK_SERVICES],
+      [STORAGE_KEYS.ADDONS, MOCK_ADDONS],
+    ] as const) {
+      const { error } = await supabase
+        .from(tableOf(key))
+        .upsert(defaults.map((d) => ({ id: d.id, data: d })));
+      if (error) throw new Error(`${tableOf(key)}: ${error.message}`);
+      byKey.set(key, [...defaults]);
+    }
+    localStorage.setItem("nimbus_catalogue_seeded", "1");
+  }
+
+  byKey.forEach((rows, key) => localStorage.setItem(key, JSON.stringify(rows)));
+}
+
 // 1. APPOINTMENTS
 export function getAppointments(): MockAppointment[] {
   if (typeof window === "undefined") return MOCK_APPOINTMENTS_DATA;
-  const stored = localStorage.getItem(STORAGE_KEYS.APPOINTMENTS);
-  if (!stored) {
-    localStorage.setItem(STORAGE_KEYS.APPOINTMENTS, JSON.stringify(MOCK_APPOINTMENTS_DATA));
-    return MOCK_APPOINTMENTS_DATA;
-  }
-  return JSON.parse(stored);
+  return readCollection(STORAGE_KEYS.APPOINTMENTS, MOCK_APPOINTMENTS_DATA);
 }
 
 export function saveAppointment(apt: MockAppointment): void {
   const current = getAppointments();
   const updated = [apt, ...current.filter((a) => a.id !== apt.id)];
-  localStorage.setItem(STORAGE_KEYS.APPOINTMENTS, JSON.stringify(updated));
+  commit(STORAGE_KEYS.APPOINTMENTS, updated);
 }
 
 export function updateAppointmentStatus(id: string, status: MockAppointment["status"]): void {
   const current = getAppointments();
   const updated = current.map((a) => (a.id === id ? { ...a, status } : a));
-  localStorage.setItem(STORAGE_KEYS.APPOINTMENTS, JSON.stringify(updated));
+  commit(STORAGE_KEYS.APPOINTMENTS, updated);
 }
 
 // 2. STAFF
 export function getStaff(): MockStaff[] {
   if (typeof window === "undefined") return MOCK_STAFF_DATA;
-  const stored = localStorage.getItem(STORAGE_KEYS.STAFF);
-  if (!stored) {
-    localStorage.setItem(STORAGE_KEYS.STAFF, JSON.stringify(MOCK_STAFF_DATA));
-    return MOCK_STAFF_DATA;
-  }
-  return JSON.parse(stored);
+  return readCollection(STORAGE_KEYS.STAFF, MOCK_STAFF_DATA);
 }
 
 export function saveStaff(staff: MockStaff): void {
   const current = getStaff();
-  const updated = [...current, staff];
-  localStorage.setItem(STORAGE_KEYS.STAFF, JSON.stringify(updated));
+  const updated = [...current.filter((s) => s.id !== staff.id), staff];
+  commit(STORAGE_KEYS.STAFF, updated);
 }
 
 // 3. CUSTOMERS
 export function getCustomers(): MockCustomer[] {
   if (typeof window === "undefined") return MOCK_CUSTOMERS_DATA;
-  const stored = localStorage.getItem(STORAGE_KEYS.CUSTOMERS);
-  if (!stored) {
-    localStorage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify(MOCK_CUSTOMERS_DATA));
-    return MOCK_CUSTOMERS_DATA;
-  }
-  return JSON.parse(stored);
+  return readCollection(STORAGE_KEYS.CUSTOMERS, MOCK_CUSTOMERS_DATA);
 }
 
 export function saveCustomer(customer: MockCustomer): void {
   const current = getCustomers();
   const updated = [customer, ...current.filter((c) => c.id !== customer.id)];
-  localStorage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify(updated));
+  commit(STORAGE_KEYS.CUSTOMERS, updated);
 }
 
 // 4. MEMBERSHIPS
 export function getMemberships(): CustomerMembership[] {
   if (typeof window === "undefined") return INITIAL_MEMBERSHIPS;
-  const stored = localStorage.getItem(STORAGE_KEYS.MEMBERSHIPS);
-  if (!stored) {
-    localStorage.setItem(STORAGE_KEYS.MEMBERSHIPS, JSON.stringify(INITIAL_MEMBERSHIPS));
-    return INITIAL_MEMBERSHIPS;
-  }
-  return JSON.parse(stored);
+  return readCollection(STORAGE_KEYS.MEMBERSHIPS, INITIAL_MEMBERSHIPS);
 }
 
 export function getCustomerMembership(customerId: string): CustomerMembership | undefined {
@@ -764,8 +879,8 @@ export function purchaseMembership(customerId: string, tierName: "BASIC" | "STAN
     customerId,
     tierName,
     displayName: tier.displayName,
-    purchaseDate: now.toISOString().split("T")[0],
-    expiryDate: expiry.toISOString().split("T")[0],
+    purchaseDate: localDateStr(now),
+    expiryDate: localDateStr(expiry),
     remainingCredits: tier.totalCredits,
     totalCredits: tier.totalCredits,
     hasQueuePriority: tier.hasQueuePriority,
@@ -774,7 +889,7 @@ export function purchaseMembership(customerId: string, tierName: "BASIC" | "STAN
 
   const current = getMemberships().filter((m) => m.customerId !== customerId);
   const updated = [newMembership, ...current];
-  localStorage.setItem(STORAGE_KEYS.MEMBERSHIPS, JSON.stringify(updated));
+  commit(STORAGE_KEYS.MEMBERSHIPS, updated);
   return newMembership;
 }
 
@@ -784,8 +899,14 @@ export function deductMembershipCredits(customerId: string, credits: number): bo
   if (!member || member.remainingCredits < credits) return false;
 
   member.remainingCredits -= credits;
-  localStorage.setItem(STORAGE_KEYS.MEMBERSHIPS, JSON.stringify(memberships));
+  commit(STORAGE_KEYS.MEMBERSHIPS, memberships);
   return true;
+}
+
+/** Create or replace a customer's membership record (used for custom credit packages). */
+export function setCustomerMembership(membership: CustomerMembership): void {
+  const current = getMemberships().filter((m) => m.customerId !== membership.customerId);
+  commit(STORAGE_KEYS.MEMBERSHIPS, [membership, ...current]);
 }
 
 export function updateCustomerMembership(
@@ -797,7 +918,7 @@ export function updateCustomerMembership(
   if (idx === -1) return undefined;
 
   memberships[idx] = { ...memberships[idx], ...updates };
-  localStorage.setItem(STORAGE_KEYS.MEMBERSHIPS, JSON.stringify(memberships));
+  commit(STORAGE_KEYS.MEMBERSHIPS, memberships);
   return memberships[idx];
 }
 
@@ -814,7 +935,7 @@ export function adjustCustomerMembershipCredits(
   if (typeof newTotalCredits === "number" && newTotalCredits > 0) {
     memberships[idx].totalCredits = Math.max(newTotalCredits, memberships[idx].remainingCredits);
   }
-  localStorage.setItem(STORAGE_KEYS.MEMBERSHIPS, JSON.stringify(memberships));
+  commit(STORAGE_KEYS.MEMBERSHIPS, memberships);
   return memberships[idx];
 }
 
@@ -830,62 +951,52 @@ export function deductPackageAddonAllowance(
   if (!allowance || allowance.remaining <= 0) return undefined;
 
   allowance.remaining -= 1;
-  localStorage.setItem(STORAGE_KEYS.MEMBERSHIPS, JSON.stringify(memberships));
+  commit(STORAGE_KEYS.MEMBERSHIPS, memberships);
   return memberships[idx];
 }
 
 // 5. GROOMING RECORDS
 export function getGroomingRecords(petId?: string): GroomingRecord[] {
   if (typeof window === "undefined") return INITIAL_GROOMING_RECORDS;
-  const stored = localStorage.getItem(STORAGE_KEYS.GROOMING_RECORDS);
-  let records: GroomingRecord[] = INITIAL_GROOMING_RECORDS;
-  if (stored) {
-    records = JSON.parse(stored);
-  } else {
-    localStorage.setItem(STORAGE_KEYS.GROOMING_RECORDS, JSON.stringify(INITIAL_GROOMING_RECORDS));
-  }
+  const records = readCollection(STORAGE_KEYS.GROOMING_RECORDS, INITIAL_GROOMING_RECORDS);
   return petId ? records.filter((r) => r.petId === petId) : records;
 }
 
 export function saveGroomingRecord(record: GroomingRecord): void {
   const current = getGroomingRecords();
   const updated = [record, ...current.filter((r) => r.id !== record.id)];
-  localStorage.setItem(STORAGE_KEYS.GROOMING_RECORDS, JSON.stringify(updated));
+  commit(STORAGE_KEYS.GROOMING_RECORDS, updated);
 }
 
 // 6. PAYMENTS & INVOICES
 export function getPayments(): PaymentRecord[] {
   if (typeof window === "undefined") return INITIAL_PAYMENTS;
-  const stored = localStorage.getItem(STORAGE_KEYS.PAYMENTS);
-  if (!stored) {
-    localStorage.setItem(STORAGE_KEYS.PAYMENTS, JSON.stringify(INITIAL_PAYMENTS));
-    return INITIAL_PAYMENTS;
-  }
-  return JSON.parse(stored);
+  return readCollection(STORAGE_KEYS.PAYMENTS, INITIAL_PAYMENTS);
 }
 
 export function savePayment(payment: PaymentRecord): void {
   const current = getPayments();
   const updated = [payment, ...current.filter((p) => p.id !== payment.id)];
-  localStorage.setItem(STORAGE_KEYS.PAYMENTS, JSON.stringify(updated));
+  commit(STORAGE_KEYS.PAYMENTS, updated);
 
   // Mark appointment as paid
   const appointments = getAppointments();
   const apt = appointments.find((a) => a.id === payment.appointmentId);
   if (apt) {
     apt.isPaid = true;
-    localStorage.setItem(STORAGE_KEYS.APPOINTMENTS, JSON.stringify(appointments));
+    commit(STORAGE_KEYS.APPOINTMENTS, appointments);
   }
 }
 
 // 7. PET MANAGEMENT HELPERS
-export function addPetToCustomer(customerId: string, pet: MockPet): void {
+/** Returns false (and saves nothing) when the customer cannot be found. */
+export function addPetToCustomer(customerId: string, pet: MockPet): boolean {
   const customers = getCustomers();
   const cust = customers.find((c) => c.id === customerId);
-  if (cust) {
-    cust.pets = [pet, ...(cust.pets || [])];
-    localStorage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify(customers));
-  }
+  if (!cust) return false;
+  cust.pets = [...(cust.pets || []), pet];
+  commit(STORAGE_KEYS.CUSTOMERS, customers);
+  return true;
 }
 
 export function updatePet(petId: string, updatedData: Partial<MockPet>): void {
@@ -897,18 +1008,39 @@ export function updatePet(petId: string, updatedData: Partial<MockPet>): void {
       break;
     }
   }
-  localStorage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify(customers));
+  commit(STORAGE_KEYS.CUSTOMERS, customers);
 }
 
 // 8. SERVICES CATALOGUE MANAGEMENT
 export function getServices(): MockService[] {
   if (typeof window === "undefined") return MOCK_SERVICES;
-  const stored = localStorage.getItem(STORAGE_KEYS.SERVICES);
-  if (!stored) {
-    localStorage.setItem(STORAGE_KEYS.SERVICES, JSON.stringify(MOCK_SERVICES));
-    return MOCK_SERVICES;
-  }
-  return JSON.parse(stored);
+  // Derive a category for legacy rows that have none (read-time only, nothing is written back)
+  return readCollection(STORAGE_KEYS.SERVICES, MOCK_SERVICES).map((s) =>
+    s.category ? s : { ...s, category: inferCategory(s.name) }
+  );
+}
+
+function inferCategory(name: string): string {
+  const lower = name.toLowerCase();
+  if (lower.includes("train") || lower.includes("behavior") || lower.includes("consult")) return "Training & Behavior";
+  if (lower.includes("spa") || lower.includes("medicat")) return "Spa & Treatment";
+  if (lower.includes("nail") || lower.includes("teeth") || lower.includes("clean")) return "Hygiene & Maintenance";
+  if (lower.includes("daycare") || lower.includes("board")) return "Daycare & Boarding";
+  return "Grooming";
+}
+
+/** Distinct categories currently in the catalogue (always includes Grooming). */
+export function getServiceCategories(): string[] {
+  const set = new Set<string>(["Grooming"]);
+  getServices().forEach((s) => s.category && set.add(s.category));
+  return Array.from(set);
+}
+
+/** Fixed-price services skip the pet size / coat surcharges (e.g. training sessions). */
+export function isFlatRate(service: MockService): boolean {
+  if (typeof service.flatRate === "boolean") return service.flatRate;
+  const cat = (service.category || "").toLowerCase();
+  return cat.includes("train") || cat.includes("daycare");
 }
 
 export function saveService(service: MockService): void {
@@ -919,30 +1051,25 @@ export function saveService(service: MockService): void {
   } else {
     services.push(service);
   }
-  localStorage.setItem(STORAGE_KEYS.SERVICES, JSON.stringify(services));
+  commit(STORAGE_KEYS.SERVICES, services);
 }
 
 export function addService(service: MockService): void {
   const services = getServices();
   const updated = [...services, service];
-  localStorage.setItem(STORAGE_KEYS.SERVICES, JSON.stringify(updated));
+  commit(STORAGE_KEYS.SERVICES, updated);
 }
 
 export function deleteService(serviceId: string): void {
   const services = getServices();
   const updated = services.filter((s) => s.id !== serviceId);
-  localStorage.setItem(STORAGE_KEYS.SERVICES, JSON.stringify(updated));
+  commit(STORAGE_KEYS.SERVICES, updated);
 }
 
 // 9. ADD-ONS MANAGEMENT
 export function getAddons(): MockAddon[] {
   if (typeof window === "undefined") return MOCK_ADDONS;
-  const stored = localStorage.getItem(STORAGE_KEYS.ADDONS);
-  if (!stored) {
-    localStorage.setItem(STORAGE_KEYS.ADDONS, JSON.stringify(MOCK_ADDONS));
-    return MOCK_ADDONS;
-  }
-  return JSON.parse(stored);
+  return readCollection(STORAGE_KEYS.ADDONS, MOCK_ADDONS);
 }
 
 export function saveAddon(addon: MockAddon): void {
@@ -953,30 +1080,30 @@ export function saveAddon(addon: MockAddon): void {
   } else {
     addons.push(addon);
   }
-  localStorage.setItem(STORAGE_KEYS.ADDONS, JSON.stringify(addons));
+  commit(STORAGE_KEYS.ADDONS, addons);
 }
 
 export function addAddon(addon: MockAddon): void {
   const addons = getAddons();
   const updated = [...addons, addon];
-  localStorage.setItem(STORAGE_KEYS.ADDONS, JSON.stringify(updated));
+  commit(STORAGE_KEYS.ADDONS, updated);
 }
 
 export function deleteAddon(addonId: string): void {
   const addons = getAddons();
   const updated = addons.filter((a) => a.id !== addonId);
-  localStorage.setItem(STORAGE_KEYS.ADDONS, JSON.stringify(updated));
+  commit(STORAGE_KEYS.ADDONS, updated);
 }
 
 // 10. STAFF EDIT & DELETE
 export function updateStaff(staff: MockStaff): void {
   const current = getStaff();
   const updated = current.map((s) => (s.id === staff.id ? staff : s));
-  localStorage.setItem(STORAGE_KEYS.STAFF, JSON.stringify(updated));
+  commit(STORAGE_KEYS.STAFF, updated);
 }
 
 export function deleteStaff(staffId: string): void {
   const current = getStaff();
   const updated = current.filter((s) => s.id !== staffId);
-  localStorage.setItem(STORAGE_KEYS.STAFF, JSON.stringify(updated));
+  commit(STORAGE_KEYS.STAFF, updated);
 }

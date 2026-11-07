@@ -80,7 +80,10 @@ export default function NewPetPage({ params }: { params: { id: string } }) {
       vaccinationExpiry: (formData.get("vaccinationExpiry") as string) || undefined,
     };
 
-    addPetToCustomer(params.id, newPet);
+    if (!addPetToCustomer(params.id, newPet)) {
+      alert("Could not find this customer, so the pet was not saved. Go back to the customer list and try again.");
+      return;
+    }
     router.push(`/customers/${params.id}`);
   }
 

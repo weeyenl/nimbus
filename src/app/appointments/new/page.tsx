@@ -22,47 +22,76 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  MOCK_SERVICES,
+  getServices,
   getStaff,
   getCustomers,
   saveAppointment,
+  calculateServicePrice,
+  localDateStr,
   MockCustomer,
+  MockService,
   MockStaff,
 } from "@/lib/mock-data";
+import { ServiceSelectItems } from "@/components/service-select-items";
+import Link from "next/link";
 
 function NewAppointmentContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const initialDate = searchParams?.get("date") || new Date().toISOString().split("T")[0];
+  const initialDate = searchParams?.get("date") || localDateStr();
+  const presetCustomerId = searchParams?.get("customerId") || "";
+  const presetPetId = searchParams?.get("petId") || "";
 
   const [customers, setCustomers] = useState<MockCustomer[]>([]);
   const [staff, setStaff] = useState<MockStaff[]>([]);
+  const [services, setServices] = useState<MockService[]>([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
   const [selectedPetId, setSelectedPetId] = useState<string>("");
-  const [selectedServiceId, setSelectedServiceId] = useState<string>("s1");
+  const [selectedServiceId, setSelectedServiceId] = useState<string>("");
   const [selectedGroomerId, setSelectedGroomerId] = useState<string>("");
+  const [error, setError] = useState("");
 
   useEffect(() => {
     const custs = getCustomers();
     setCustomers(custs);
-    if (custs.length > 0) {
-      setSelectedCustomerId(custs[0].id);
-      if (custs[0].pets.length > 0) setSelectedPetId(custs[0].pets[0].id);
+    const initial = custs.find((c) => c.id === presetCustomerId) || custs[0];
+    if (initial) {
+      setSelectedCustomerId(initial.id);
+      const preset = initial.pets.find((p) => p.id === presetPetId);
+      const firstPet = preset || initial.pets[0];
+      setSelectedPetId(firstPet ? firstPet.id : "");
     }
-    const groomers = getStaff().filter((s) => s.role === "GROOMER");
+    const svcs = getServices();
+    setServices(svcs);
+    if (svcs.length > 0) setSelectedServiceId(svcs[0].id);
+    const groomers = getStaff().filter((s) => s.role === "GROOMER" && s.isActive !== false);
     setStaff(groomers);
     if (groomers.length > 0) setSelectedGroomerId(groomers[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const selectedCustomer = customers.find((c) => c.id === selectedCustomerId);
-  const selectedService = MOCK_SERVICES.find((s) => s.id === selectedServiceId) || MOCK_SERVICES[0];
+  // Only ever use a pet that really belongs to the selected customer
+  const selectedPet = selectedCustomer?.pets.find((p) => p.id === selectedPetId);
+  const selectedService = services.find((s) => s.id === selectedServiceId);
+  const quotedPrice =
+    selectedService && selectedPet
+      ? calculateServicePrice(selectedService.id, selectedPet.size, selectedPet.coatType)
+      : selectedService?.basePrice ?? 0;
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    setError("");
     const formData = new FormData(e.currentTarget);
     const dateStr = (formData.get("date") as string) || initialDate;
     const startTimeStr = (formData.get("time") as string) || "10:00";
     const notes = formData.get("notes") as string;
+
+    const groomer = staff.find((g) => g.id === selectedGroomerId);
+    if (!selectedCustomer) return setError("Please select a customer.");
+    if (!selectedPet) return setError("Please select a pet. If this customer has no pets yet, add one first.");
+    if (!selectedService) return setError("Please select a service.");
+    if (!groomer) return setError("Please select a groomer. Add one under Staff & Shifts if the list is empty.");
 
     const [startH, startM] = startTimeStr.split(":").map(Number);
     const totalMinutes = startH * 60 + startM + selectedService.duration;
@@ -70,27 +99,20 @@ function NewAppointmentContent() {
     const endM = totalMinutes % 60;
     const endTimeStr = `${String(endH).padStart(2, "0")}:${String(endM).padStart(2, "0")}`;
 
-    const groomer = staff.find((g) => g.id === selectedGroomerId) || staff[0] || { id: "g1", name: "Amy Chen" };
-    const pet = selectedCustomer?.pets.find((p) => p.id === selectedPetId) || selectedCustomer?.pets[0] || {
-      id: "p_unknown",
-      name: "Pet",
-      breed: "Mixed",
-      size: "SMALL" as const,
-    };
-
-    const newAppointment = {
+    saveAppointment({
       id: `apt_${Date.now()}`,
-      customerId: selectedCustomer?.id || "c1",
-      customerName: selectedCustomer?.name || "Customer",
-      customerPhone: selectedCustomer?.phone || "+65 9000 0000",
-      petId: pet.id,
-      petName: pet.name,
-      petBreed: pet.breed,
-      petSize: pet.size,
+      customerId: selectedCustomer.id,
+      customerName: selectedCustomer.name,
+      customerPhone: selectedCustomer.phone,
+      petId: selectedPet.id,
+      petName: selectedPet.name,
+      petBreed: selectedPet.breed,
+      petSize: selectedPet.size,
+      petCoatType: selectedPet.coatType,
       serviceId: selectedService.id,
       serviceName: selectedService.name,
       serviceDuration: selectedService.duration,
-      servicePrice: selectedService.price,
+      servicePrice: quotedPrice,
       groomerId: groomer.id,
       groomerName: groomer.name,
       status: "BOOKED" as const,
@@ -99,9 +121,7 @@ function NewAppointmentContent() {
       dateStr: dateStr,
       startTime: startTimeStr,
       endTime: endTimeStr,
-    };
-
-    saveAppointment(newAppointment);
+    });
     router.push("/calendar");
   }
 
@@ -133,9 +153,7 @@ function NewAppointmentContent() {
                 onValueChange={(val) => {
                   setSelectedCustomerId(val);
                   const cust = customers.find((c) => c.id === val);
-                  if (cust && cust.pets.length > 0) {
-                    setSelectedPetId(cust.pets[0].id);
-                  }
+                  setSelectedPetId(cust && cust.pets.length > 0 ? cust.pets[0].id : "");
                 }}
               >
                 <SelectTrigger>
@@ -149,6 +167,12 @@ function NewAppointmentContent() {
                   ))}
                 </SelectContent>
               </Select>
+              {customers.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  No customers yet.{" "}
+                  <Link href="/customers/new" className="text-primary underline">Add a customer</Link> first.
+                </p>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -156,7 +180,7 @@ function NewAppointmentContent() {
               <Select
                 value={selectedPetId}
                 onValueChange={setSelectedPetId}
-                disabled={!selectedCustomerId}
+                disabled={!selectedCustomer || selectedCustomer.pets.length === 0}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select a pet" />
@@ -169,6 +193,15 @@ function NewAppointmentContent() {
                   ))}
                 </SelectContent>
               </Select>
+              {selectedCustomer && selectedCustomer.pets.length === 0 && (
+                <p className="text-xs text-destructive">
+                  {selectedCustomer.name} has no pets yet.{" "}
+                  <Link href={`/customers/${selectedCustomer.id}/pets/new`} className="underline">
+                    Add a pet
+                  </Link>{" "}
+                  before booking.
+                </p>
+              )}
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
@@ -182,11 +215,7 @@ function NewAppointmentContent() {
                     <SelectValue placeholder="Select a service" />
                   </SelectTrigger>
                   <SelectContent>
-                    {MOCK_SERVICES.map((service) => (
-                      <SelectItem key={service.id} value={service.id}>
-                        {service.name} ({service.duration} mins - ${service.price})
-                      </SelectItem>
-                    ))}
+                    <ServiceSelectItems services={services} />
                   </SelectContent>
                 </Select>
               </div>
@@ -208,6 +237,11 @@ function NewAppointmentContent() {
                     ))}
                   </SelectContent>
                 </Select>
+                {staff.length === 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    No groomers yet — add one under Staff &amp; Shifts.
+                  </p>
+                )}
               </div>
             </div>
 
@@ -239,9 +273,12 @@ function NewAppointmentContent() {
               <div className="rounded-md bg-muted/60 p-3 text-sm">
                 <p className="font-medium text-foreground">
                   Estimated Duration: {selectedService.duration} minutes
+                  {" · "}Price: ${quotedPrice}
                 </p>
                 <p className="text-muted-foreground text-xs mt-0.5">
-                  Slot will be automatically reserved from start to end time.
+                  {selectedPet
+                    ? "Price reflects the pet's size and coat. Slot is reserved from start to end time."
+                    : "Slot will be automatically reserved from start to end time."}
                 </p>
               </div>
             )}
@@ -255,6 +292,8 @@ function NewAppointmentContent() {
                 rows={3}
               />
             </div>
+
+            {error && <p className="text-sm text-destructive">{error}</p>}
 
             <div className="flex justify-end gap-2 pt-4">
               <Button

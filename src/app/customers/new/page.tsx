@@ -21,8 +21,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { REFERRAL_SOURCES } from "@/lib/utils";
-import { saveCustomer, MockCustomer } from "@/lib/mock-data";
+import { REFERRAL_SOURCES, PET_SIZE_LABELS } from "@/lib/utils";
+import { saveCustomer, MockCustomer, MockPet } from "@/lib/mock-data";
+
+const COAT_TYPES = [
+  { value: "SHORT", label: "Short" },
+  { value: "MEDIUM", label: "Medium" },
+  { value: "LONG", label: "Long" },
+  { value: "DOUBLE", label: "Double Coat" },
+  { value: "WIRE", label: "Wire / Coarse" },
+  { value: "CURLY", label: "Curly / Wool" },
+];
 
 export default function NewCustomerPage() {
   const router = useRouter();
@@ -36,8 +45,10 @@ export default function NewCustomerPage() {
     const address = formData.get("address") as string;
     const referralSource = formData.get("referralSource") as string;
     const notes = formData.get("notes") as string;
-    const petName = formData.get("petName") as string;
+    const petName = ((formData.get("petName") as string) || "").trim();
     const petBreed = formData.get("petBreed") as string;
+    const petSize = ((formData.get("petSize") as MockPet["size"]) || "SMALL");
+    const petCoat = ((formData.get("petCoat") as MockPet["coatType"]) || "SHORT");
 
     const newCustomer: MockCustomer = {
       id: `c_${Date.now()}`,
@@ -50,19 +61,20 @@ export default function NewCustomerPage() {
       pets: petName ? [
         {
           id: `p_${Date.now()}`,
-          name: petName.trim(),
+          name: petName,
           breed: petBreed ? petBreed.trim() : "Mixed Breed",
           age: 2,
-          size: "SMALL",
+          size: petSize,
           weight: 5,
-          coatType: "SHORT",
+          coatType: petCoat,
           warnings: [],
         }
       ] : [],
     };
 
     saveCustomer(newCustomer);
-    router.push("/customers");
+    // Go straight to the profile so pets can be added / booked right away
+    router.push(`/customers/${newCustomer.id}`);
   }
 
   return (
@@ -156,6 +168,36 @@ export default function NewCustomerPage() {
                 <div className="space-y-2">
                   <Label htmlFor="petBreed">Breed</Label>
                   <Input id="petBreed" name="petBreed" placeholder="e.g. Corgi" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Size</Label>
+                  <Select name="petSize" defaultValue="SMALL">
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(PET_SIZE_LABELS).map(([val, label]) => (
+                        <SelectItem key={val} value={val}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Coat</Label>
+                  <Select name="petCoat" defaultValue="SHORT">
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {COAT_TYPES.map((c) => (
+                        <SelectItem key={c.value} value={c.value}>
+                          {c.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
             </div>

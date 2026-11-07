@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { PawPrint, Lock, Mail, ArrowRight, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -15,20 +15,47 @@ import {
   CardFooter,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("owner@doglab.com");
-  const [password, setPassword] = useState("••••••••");
+  const [email, setEmail] = useState(isSupabaseConfigured ? "" : "owner@doglab.com");
+  const [password, setPassword] = useState(isSupabaseConfigured ? "" : "demo");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  // Already signed in? Skip the form.
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session) router.replace("/");
+    });
+  }, [router]);
 
   function handleLogin(role: string, roleEmail: string) {
+    // Demo mode only (the quick-login buttons are hidden once Supabase is connected)
+    localStorage.setItem("nimbus_current_role", role);
     setEmail(roleEmail);
-    // In mock/prototype mode, immediately route to dashboard
     router.push("/");
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!isSupabaseConfigured) {
+      router.push("/");
+      return;
+    }
+    setError("");
+    setLoading(true);
+    const { error: authError } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
+    setLoading(false);
+    if (authError) {
+      setError(authError.message);
+      return;
+    }
     router.push("/");
   }
 
@@ -81,12 +108,14 @@ export default function LoginPage() {
               </div>
             </div>
 
-            <Button type="submit" className="w-full gap-2">
-              Sign In <ArrowRight className="h-4 w-4" />
+            {error && <p className="text-sm text-destructive">{error}</p>}
+            <Button type="submit" className="w-full gap-2" disabled={loading}>
+              {loading ? "Signing in…" : "Sign In"} <ArrowRight className="h-4 w-4" />
             </Button>
           </form>
 
-          {/* Quick Demo Logins for Client Presentation */}
+          {/* Quick Demo Logins — demo mode only */}
+          {!isSupabaseConfigured && (
           <div className="mt-6 border-t pt-4">
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-3 font-medium">
               <ShieldCheck className="h-4 w-4 text-primary" />
@@ -122,10 +151,13 @@ export default function LoginPage() {
               </Button>
             </div>
           </div>
+          )}
         </CardContent>
         <CardFooter className="justify-center border-t py-3">
           <p className="text-xs text-muted-foreground">
-            Protected by Supabase Auth & Role-Based Access Control
+            {isSupabaseConfigured
+              ? "Accounts are created by the salon owner in Supabase"
+              : "Demo mode — Supabase not connected"}
           </p>
         </CardFooter>
       </Card>

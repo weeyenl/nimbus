@@ -1,10 +1,11 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   Calendar,
+  LogOut,
   Users,
   PawPrint,
   Scissors,
@@ -33,6 +34,8 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import { hydrateFromCloud, getStaff } from "@/lib/mock-data";
 
 type UserRole = "OWNER" | "RECEPTIONIST" | "GROOMER";
 
@@ -83,25 +86,128 @@ const ROLE_PROFILES = [
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [currentRole, setCurrentRole] = useState<UserRole>("OWNER");
   const [isRoleModalOpen, setIsRoleModalOpen] = useState(false);
+  const [phase, setPhase] = useState<"loading" | "ready" | "error">("loading");
+  const [loadError, setLoadError] = useState("");
+  const [userEmail, setUserEmail] = useState("");
+  const [syncError, setSyncError] = useState("");
+  const [retryCount, setRetryCount] = useState(0);
 
+  const isLoginPage = pathname === "/login";
+
+  // Demo mode only: remembered role switcher choice
   useEffect(() => {
+    if (isSupabaseConfigured) return;
     const saved = localStorage.getItem("nimbus_current_role") as UserRole;
     if (saved && ["OWNER", "RECEPTIONIST", "GROOMER"].includes(saved)) {
       setCurrentRole(saved);
     }
   }, []);
 
+  // Cloud mode: require a session, then load data from Supabase before rendering any page
+  useEffect(() => {
+    if (!isSupabaseConfigured) {
+      setPhase("ready");
+      return;
+    }
+    if (isLoginPage) return;
+
+    let cancelled = false;
+    setPhase("loading");
+    (async () => {
+      const { data } = await supabase.auth.getSession();
+      const user = data.session?.user;
+      if (!user) {
+        router.replace("/login");
+        return;
+      }
+      try {
+        await hydrateFromCloud();
+      } catch (err) {
+        if (!cancelled) {
+          setLoadError(err instanceof Error ? err.message : String(err));
+          setPhase("error");
+        }
+        return;
+      }
+      if (cancelled) return;
+      const email = user.email || "";
+      const staffMatch = getStaff().find((s) => s.email?.toLowerCase() === email.toLowerCase());
+      const metaRole = (user.user_metadata?.role || user.app_metadata?.role) as UserRole | undefined;
+      const role: UserRole =
+        (staffMatch?.role as UserRole | undefined) ||
+        (metaRole && ["OWNER", "RECEPTIONIST", "GROOMER"].includes(metaRole) ? metaRole : "OWNER");
+      setUserEmail(email);
+      setCurrentRole(role);
+      setPhase("ready");
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoginPage, retryCount, router]);
+
+  // Sign-out from anywhere (or from another tab) sends you back to the login screen
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    const { data } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_OUT") router.replace("/login");
+    });
+    return () => data.subscription.unsubscribe();
+  }, [router]);
+
+  // Surface failed cloud writes so data is never silently lost
+  useEffect(() => {
+    const onSyncError = (e: Event) => setSyncError((e as CustomEvent<string>).detail);
+    window.addEventListener("nimbus-sync-error", onSyncError);
+    return () => window.removeEventListener("nimbus-sync-error", onSyncError);
+  }, []);
+
   const handleRoleChange = (role: UserRole) => {
+    if (isSupabaseConfigured) return; // real roles come from the signed-in account
     setCurrentRole(role);
     localStorage.setItem("nimbus_current_role", role);
     setIsRoleModalOpen(false);
   };
 
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    localStorage.removeItem("nimbus_current_role");
+    router.replace("/login");
+  };
+
   const activeProfile = ROLE_PROFILES.find((p) => p.role === currentRole) || ROLE_PROFILES[0];
+  const displayName = isSupabaseConfigured && userEmail ? userEmail : activeProfile.name;
   const visibleNavItems = ALL_NAV_ITEMS.filter((item) => item.roles.includes(currentRole));
+  const routeRule = ALL_NAV_ITEMS.find((i) => i.href !== "/" && pathname.startsWith(i.href));
+  const routeAllowed = !routeRule || routeRule.roles.includes(currentRole);
+
+  if (isLoginPage) return <>{children}</>;
+
+  if (phase !== "ready") {
+    return (
+      <div className="flex h-dvh items-center justify-center p-6 text-center">
+        {phase === "error" ? (
+          <div className="max-w-md space-y-3">
+            <p className="font-semibold text-destructive">Could not load data from Supabase</p>
+            <p className="text-sm text-muted-foreground break-words">{loadError}</p>
+            <p className="text-xs text-muted-foreground">
+              Most common cause: the tables don&apos;t exist yet. Run <code>supabase/schema.sql</code> in the
+              Supabase SQL Editor.
+            </p>
+            <div className="flex justify-center gap-2">
+              <Button onClick={() => setRetryCount((n) => n + 1)}>Retry</Button>
+              <Button variant="outline" onClick={handleSignOut}>Sign out</Button>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">Loading Nimbus…</p>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-dvh overflow-hidden bg-background">
@@ -171,21 +277,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </ScrollArea>
 
         {/* Active Role & Hidden Admin Switcher Footer */}
-        <div className="border-t p-3 bg-muted/20">
+        <div className="border-t p-3 bg-muted/20 space-y-1">
           <div
-            onClick={() => setIsRoleModalOpen(true)}
-            className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-muted/60 cursor-pointer transition-colors"
-            title="Click to switch role or open role permissions"
+            onClick={() => !isSupabaseConfigured && setIsRoleModalOpen(true)}
+            className={cn(
+              "flex items-center gap-2.5 p-2 rounded-lg transition-colors",
+              !isSupabaseConfigured && "hover:bg-muted/60 cursor-pointer"
+            )}
+            title={isSupabaseConfigured ? displayName : "Click to switch role or open role permissions"}
           >
             <Avatar className="h-8 w-8 shrink-0">
               <AvatarFallback className="bg-primary/10 text-primary text-xs font-bold">
-                {activeProfile.name.split(" ").map((n) => n[0]).join("")}
+                {displayName.slice(0, 2).toUpperCase()}
               </AvatarFallback>
             </Avatar>
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold truncate">{activeProfile.name}</span>
-                <Sliders className="h-3 w-3 text-muted-foreground shrink-0 ml-1" />
+                <span className="text-xs font-semibold truncate">{displayName}</span>
+                {!isSupabaseConfigured && <Sliders className="h-3 w-3 text-muted-foreground shrink-0 ml-1" />}
               </div>
               <Badge
                 variant="outline"
@@ -195,11 +304,29 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </Badge>
             </div>
           </div>
+          {isSupabaseConfigured ? (
+            <Button variant="ghost" size="sm" className="w-full justify-start gap-2 text-xs" onClick={handleSignOut}>
+              <LogOut className="h-3.5 w-3.5" /> Sign out
+            </Button>
+          ) : (
+            <p className="px-2 text-[10px] text-amber-700">Demo mode — data stays in this browser only</p>
+          )}
         </div>
       </aside>
 
       {/* Main content area */}
       <div className="flex flex-1 flex-col overflow-hidden">
+        {syncError && (
+          <div className="flex items-start justify-between gap-3 bg-destructive px-4 py-2 text-xs text-destructive-foreground">
+            <span>
+              Some changes could not be saved to the database ({syncError}). Check your connection and make sure
+              you are signed in, then redo the change.
+            </span>
+            <button onClick={() => setSyncError("")} aria-label="Dismiss">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
         {/* Top bar — mobile only */}
         <header className="flex h-14 items-center justify-between border-b bg-card px-4 md:hidden">
           <div className="flex items-center gap-3">
@@ -222,7 +349,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             variant="outline"
             size="sm"
             className="h-8 text-xs gap-1.5"
-            onClick={() => setIsRoleModalOpen(true)}
+            onClick={() => !isSupabaseConfigured && setIsRoleModalOpen(true)}
           >
             <Shield className="h-3.5 w-3.5 text-primary" />
             <span>{currentRole}</span>
@@ -232,7 +359,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {/* Page content */}
         <main className="flex-1 overflow-auto">
           <div className="container mx-auto max-w-7xl p-4 md:p-6 lg:p-8">
-            {children}
+            {routeAllowed ? (
+              children
+            ) : (
+              <div className="py-16 text-center text-sm text-muted-foreground">
+                Your role ({currentRole}) does not have access to this page.
+              </div>
+            )}
           </div>
         </main>
 

@@ -45,6 +45,8 @@ import {
   getCustomerMembership,
   purchaseMembership,
   updateCustomerMembership,
+  setCustomerMembership,
+  localDateStr,
   adjustCustomerMembershipCredits,
   deductPackageAddonAllowance,
   MEMBERSHIP_TIERS,
@@ -79,26 +81,42 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
     { id: string; name: string; total: number; remaining: number }[]
   >([]);
 
+  const [notFound, setNotFound] = useState(false);
+
   const loadData = () => {
     const custs = getCustomers();
-    const found = custs.find((c) => c.id === params.id) || custs[0];
+    // Never fall back to a different customer: Add Pet / Book / Adjust Balance would hit the wrong person
+    const found = custs.find((c) => c.id === params.id);
+    if (!found) {
+      setCustomer(null);
+      setNotFound(true);
+      return;
+    }
+    setNotFound(false);
     setCustomer(found);
 
-    if (found) {
-      const apts = getAppointments().filter(
-        (a) => a.customerId === found.id || a.customerName === found.name
-      );
-      setAppointments(apts);
+    const apts = getAppointments().filter((a) => a.customerId === found.id);
+    setAppointments(apts);
 
-      const mem = getCustomerMembership(found.id);
-      setMembership(mem);
-    }
+    const mem = getCustomerMembership(found.id);
+    setMembership(mem);
   };
 
   useEffect(() => {
     loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id]);
 
+  if (notFound) {
+    return (
+      <div className="py-16 text-center space-y-3">
+        <p className="font-semibold">Customer not found</p>
+        <Button asChild variant="outline">
+          <Link href="/customers">Back to customers</Link>
+        </Button>
+      </div>
+    );
+  }
   if (!customer) return null;
 
   function handleBuyTier(tierName: "BASIC" | "STANDARD" | "VIP" | "SVIP") {
@@ -120,15 +138,15 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
       customerId: customer.id,
       tierName: "BASIC",
       displayName: customTierName.trim() || "Store Credit Package",
-      purchaseDate: now.toISOString().split("T")[0],
-      expiryDate: expiry.toISOString().split("T")[0],
+      purchaseDate: localDateStr(now),
+      expiryDate: localDateStr(expiry),
       remainingCredits: Number(customCredits) || 0,
       totalCredits: Number(customCredits) || 0,
       hasQueuePriority: false,
       bonusAllowances: [],
     };
 
-    updateCustomerMembership(customer.id, newMem);
+    setCustomerMembership(newMem);
     setMembership(newMem);
     setIsBuyMembershipOpen(false);
   }

@@ -96,3 +96,21 @@ Nimbus is built mobile-first. Staff on tablets or phones can install the app dir
 1. Open the URL in Safari (iOS) or Chrome (Android).
 2. Tap **Share** (iOS) or the three-dot menu (Android).
 3. Select **"Add to Home Screen"**.
+
+
+---
+
+## ☁️ Connecting Supabase (data + login)
+
+Without Supabase env vars Nimbus runs in **demo mode** (mock data in the browser only, no login).
+With them it uses Supabase for storage and requires login.
+
+1. **Env vars** (Vercel → Project → Settings → Environment Variables, then **Redeploy**):
+   `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` (Supabase → Project Settings → API).
+2. **Tables**: run [`supabase/schema.sql`](supabase/schema.sql) in Supabase → SQL Editor. It creates the tables and
+   only lets signed-in users read/write them.
+3. **Users**: Supabase → Authentication → Users → *Add user* (tick *Auto Confirm*). Turn off public sign-ups under
+   Authentication → Sign In / Providers → Email so only people you add can log in.
+4. **Roles**: a user's role is taken from the Staff record with the same email (Owner / Receptionist / Groomer).
+   No matching staff record → Owner. Create your own staff record first, then add the others.
+5. The app does not use Prisma at runtime; `prisma/` is no longer needed for the app to work.

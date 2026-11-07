@@ -65,7 +65,7 @@ import {
   saveGroomingRecord,
   getPayments,
   savePayment,
-  MOCK_ADDONS,
+  getAddons,
   MockAppointment,
   CustomerMembership,
   GroomingRecord,
@@ -130,7 +130,7 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
 
   useEffect(() => {
     const list = getAppointments();
-    const found = list.find((a) => a.id === params.id) || list[0];
+    const found = list.find((a) => a.id === params.id);
     if (found) {
       setApt(found);
       setStatus(found.status);
@@ -175,7 +175,7 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
 
   function handleAddAddon(addonId: string) {
     if (!apt) return;
-    const addon = MOCK_ADDONS.find((a) => a.id === addonId);
+    const addon = getAddons().find((a) => a.id === addonId);
     if (!addon) return;
     if (selectedAddons.some((a) => a.id === addon.id)) return;
 
@@ -245,6 +245,10 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
   function handleProcessPayment(e: React.FormEvent) {
     e.preventDefault();
     if (!apt) return;
+    if (apt.isPaid || paymentRecord) {
+      alert("This appointment has already been paid.");
+      return;
+    }
 
     if (paymentMethod === "MEMBERSHIP_CREDIT") {
       if (!membership || membership.remainingCredits < grandTotal) {
@@ -265,7 +269,7 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
     const newPayment: PaymentRecord = {
       id: `pay_${Date.now()}`,
       appointmentId: apt.id,
-      invoiceNumber: `INV-2024-${Math.floor(1000 + Math.random() * 9000)}`,
+      invoiceNumber: `INV-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`,
       customerName: apt.customerName,
       customerPhone: apt.customerPhone,
       petName: apt.petName,
@@ -543,7 +547,7 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
                     <span>Add extra</span>
                   </SelectTrigger>
                   <SelectContent>
-                    {MOCK_ADDONS.map((addon) => (
+                    {getAddons().map((addon) => (
                       <SelectItem key={addon.id} value={addon.id}>
                         {addon.name} (+${addon.price})
                       </SelectItem>

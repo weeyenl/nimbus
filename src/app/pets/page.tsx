@@ -87,6 +87,7 @@ export default function PetsPage() {
     if (custs.length > 0 && !selectedCustomerId) {
       setSelectedCustomerId(custs[0].id);
     }
+    if (custs.length === 0) setIsNewOwner(true);
   }
 
   useEffect(() => {
@@ -129,18 +130,22 @@ export default function PetsPage() {
     e.preventDefault();
     if (!petName.trim()) return;
 
-    let targetCustomerId = selectedCustomerId;
+    // The dropdown displays customers[0] when nothing was picked, so use the same fallback here
+    let targetCustomerId = selectedCustomerId || customers[0]?.id || "";
+    let newCustomerToSave: MockCustomer | null = null;
 
     if (isNewOwner) {
       if (!newOwnerName.trim() || !newOwnerPhone.trim()) return;
-      const newCust: MockCustomer = {
+      newCustomerToSave = {
         id: `c_${Date.now()}`,
         name: newOwnerName.trim(),
         phone: newOwnerPhone.trim(),
         pets: [],
       };
-      saveCustomer(newCust);
-      targetCustomerId = newCust.id;
+      targetCustomerId = newCustomerToSave.id;
+    } else if (!targetCustomerId || !customers.some((c) => c.id === targetCustomerId)) {
+      alert("Please choose an owner for this pet (or switch to 'New owner').");
+      return;
     }
 
     const newPet: MockPet = {
@@ -155,7 +160,13 @@ export default function PetsPage() {
       vaccinationExpiry: vaccinationExpiry || undefined,
     };
 
-    addPetToCustomer(targetCustomerId, newPet);
+    // Save the owner and pet together so a failure can never leave an owner without the pet
+    if (newCustomerToSave) {
+      saveCustomer({ ...newCustomerToSave, pets: [newPet] });
+    } else if (!addPetToCustomer(targetCustomerId, newPet)) {
+      alert("Could not save the pet because the owner was not found.");
+      return;
+    }
     refreshData();
 
     // Reset and close

@@ -22,31 +22,40 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import {
-  MOCK_SERVICES,
+  getServices,
   getStaff,
   getCustomers,
   saveAppointment,
   saveCustomer,
+  addPetToCustomer,
+  calculateServicePrice,
+  localDateStr,
   MockCustomer,
+  MockPet,
+  MockService,
   MockStaff,
 } from "@/lib/mock-data";
+import { ServiceSelectItems } from "@/components/service-select-items";
+import { PET_SIZE_LABELS } from "@/lib/utils";
 
 export default function WalkInPage() {
   const router = useRouter();
   const [customers, setCustomers] = useState<MockCustomer[]>([]);
   const [staff, setStaff] = useState<MockStaff[]>([]);
+  const [services, setServices] = useState<MockService[]>([]);
   const [isNewCustomer, setIsNewCustomer] = useState(false);
   const [searchPhone, setSearchPhone] = useState("");
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
   const [selectedPetId, setSelectedPetId] = useState<string>("");
-  const [selectedServiceId, setSelectedServiceId] = useState<string>("s6");
+  const [selectedServiceId, setSelectedServiceId] = useState<string>("");
   const [selectedGroomerId, setSelectedGroomerId] = useState<string>("");
+  const [error, setError] = useState("");
 
   // New customer form state
   const [newOwnerName, setNewOwnerName] = useState("");
   const [newOwnerPhone, setNewOwnerPhone] = useState("");
   const [newPetName, setNewPetName] = useState("");
-  const [newPetBreed, setNewPetBreed] = useState("Poodle");
+  const [newPetBreed, setNewPetBreed] = useState("");
   const [newPetSize, setNewPetSize] = useState<"SMALL" | "MEDIUM" | "LARGE" | "EXTRA_LARGE">("SMALL");
 
   useEffect(() => {
@@ -54,100 +63,107 @@ export default function WalkInPage() {
     setCustomers(custs);
     if (custs.length > 0) {
       setSelectedCustomerId(custs[0].id);
-      if (custs[0].pets.length > 0) {
-        setSelectedPetId(custs[0].pets[0].id);
-      }
+      setSelectedPetId(custs[0].pets[0]?.id ?? "");
+    } else {
+      setIsNewCustomer(true);
     }
-    const staffList = getStaff().filter((s) => s.role === "GROOMER");
+    const svcs = getServices();
+    setServices(svcs);
+    if (svcs.length > 0) setSelectedServiceId(svcs[0].id);
+    const staffList = getStaff().filter((s) => s.role === "GROOMER" && s.isActive !== false);
     setStaff(staffList);
-    if (staffList.length > 0) {
-      setSelectedGroomerId(staffList[0].id);
-    }
+    if (staffList.length > 0) setSelectedGroomerId(staffList[0].id);
   }, []);
 
-  const activeCustomer = customers.find((c) =>
-    searchPhone
-      ? c.phone.includes(searchPhone) || c.name.toLowerCase().includes(searchPhone.toLowerCase())
-      : c.id === selectedCustomerId
-  ) || customers[0];
+  // One source of truth: the customer shown on screen is the customer that gets booked.
+  const activeCustomer = customers.find((c) => c.id === selectedCustomerId);
+  const activePet: MockPet | undefined =
+    activeCustomer?.pets.find((p) => p.id === selectedPetId) ?? activeCustomer?.pets[0];
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    setError("");
 
-    const now = new Date();
-    const todayStr = now.toISOString().split("T")[0];
-    const startTimeStr = now.toTimeString().slice(0, 5); // "HH:MM"
-    const service = MOCK_SERVICES.find((s) => s.id === selectedServiceId) || MOCK_SERVICES[0];
-    const groomer = staff.find((g) => g.id === selectedGroomerId) || staff[0] || { id: "g1", name: "Amy Chen" };
+    const service = services.find((s) => s.id === selectedServiceId);
+    const groomer = staff.find((g) => g.id === selectedGroomerId);
+    if (!service) return setError("Please select a service.");
+    if (!groomer) return setError("Please select a groomer. Add one under Staff & Shifts if the list is empty.");
 
-    const endHour = new Date(now.getTime() + service.duration * 60000);
-    const endTimeStr = endHour.toTimeString().slice(0, 5);
-
-    let finalCustomerId = selectedCustomerId;
-    let finalCustomerName = activeCustomer?.name || "Walk-in Guest";
-    let finalCustomerPhone = activeCustomer?.phone || "+65 9000 0000";
-    let finalPetId = selectedPetId;
-    let finalPetName = activeCustomer?.pets.find((p) => p.id === selectedPetId)?.name || "Pet";
-    let finalPetBreed = activeCustomer?.pets.find((p) => p.id === selectedPetId)?.breed || "Mixed";
-    let finalPetSize: "SMALL" | "MEDIUM" | "LARGE" | "EXTRA_LARGE" = activeCustomer?.pets.find((p) => p.id === selectedPetId)?.size || "SMALL";
+    let customer: MockCustomer | undefined;
+    let pet: MockPet | undefined;
 
     if (isNewCustomer) {
-      const newCustId = `c_${Date.now()}`;
-      const newPId = `p_${Date.now()}`;
-      const newCust: MockCustomer = {
-        id: newCustId,
-        name: newOwnerName || "Walk-in Customer",
-        phone: newOwnerPhone || "+65 9123 0000",
-        referralSource: "Walk-in",
-        pets: [
-          {
-            id: newPId,
-            name: newPetName || "Buddy",
-            breed: newPetBreed || "Mixed Breed",
-            age: 2,
-            size: newPetSize,
-            weight: 5,
-            coatType: "SHORT",
-            warnings: [],
-          },
-        ],
+      const name = newOwnerName.trim();
+      const phone = newOwnerPhone.trim();
+      const petName = newPetName.trim();
+      if (!name || !phone || !petName) return setError("Owner name, phone and pet name are required.");
+
+      const newPet: MockPet = {
+        id: `p_${Date.now()}`,
+        name: petName,
+        breed: newPetBreed.trim() || "Mixed Breed",
+        age: 2,
+        size: newPetSize,
+        weight: 5,
+        coatType: "SHORT",
+        warnings: [],
       };
-      saveCustomer(newCust);
-      finalCustomerId = newCustId;
-      finalCustomerName = newCust.name;
-      finalCustomerPhone = newCust.phone;
-      finalPetId = newPId;
-      finalPetName = newCust.pets[0].name;
-      finalPetBreed = newCust.pets[0].breed;
-      finalPetSize = newCust.pets[0].size;
+
+      const digits = (s: string) => s.replace(/\D/g, "");
+      const existing = customers.find((c) => digits(c.phone) === digits(phone));
+      if (existing) {
+        // Same phone number = same owner: attach the pet instead of creating a duplicate customer
+        if (!addPetToCustomer(existing.id, newPet)) return setError("Could not save the pet. Please try again.");
+        customer = { ...existing, pets: [...existing.pets, newPet] };
+      } else {
+        customer = {
+          id: `c_${Date.now()}`,
+          name,
+          phone,
+          referralSource: "Walk-in",
+          pets: [newPet],
+        };
+        saveCustomer(customer);
+      }
+      pet = newPet;
+    } else {
+      customer = activeCustomer;
+      pet = activePet;
+      if (!customer) return setError("Please search for and select an owner, or add a new one.");
+      if (!pet) return setError("This owner has no pets yet. Add a pet to their profile first, or use Quick Add New Owner.");
     }
 
-    const newAppointment = {
+    const now = new Date();
+    const endTime = new Date(now.getTime() + service.duration * 60000);
+    const price = calculateServicePrice(service.id, pet.size, pet.coatType);
+
+    saveAppointment({
       id: `apt_${Date.now()}`,
-      customerId: finalCustomerId,
-      customerName: finalCustomerName,
-      customerPhone: finalCustomerPhone,
-      petId: finalPetId,
-      petName: finalPetName,
-      petBreed: finalPetBreed,
-      petSize: finalPetSize,
+      customerId: customer.id,
+      customerName: customer.name,
+      customerPhone: customer.phone,
+      petId: pet.id,
+      petName: pet.name,
+      petBreed: pet.breed,
+      petSize: pet.size,
+      petCoatType: pet.coatType,
       serviceId: service.id,
       serviceName: service.name,
       serviceDuration: service.duration,
-      servicePrice: service.price,
+      servicePrice: price,
       groomerId: groomer.id,
       groomerName: groomer.name,
       status: "ARRIVED" as const,
       isWalkIn: true,
       notes: "Walk-in client checked in at front desk.",
-      dateStr: todayStr,
-      startTime: startTimeStr,
-      endTime: endTimeStr,
-    };
-
-    saveAppointment(newAppointment);
+      dateStr: localDateStr(now),
+      startTime: now.toTimeString().slice(0, 5),
+      // Past midnight? Cap at 23:59 so the end time never sorts before the start time.
+      endTime: localDateStr(endTime) === localDateStr(now) ? endTime.toTimeString().slice(0, 5) : "23:59",
+    });
     router.push("/appointments");
   }
+
 
   return (
     <div className="space-y-6">
@@ -234,6 +250,21 @@ export default function WalkInPage() {
                     onChange={(e) => setNewPetBreed(e.target.value)}
                   />
                 </div>
+                <div className="space-y-1.5 sm:col-span-2">
+                  <Label>Pet Size</Label>
+                  <Select value={newPetSize} onValueChange={(v) => setNewPetSize(v as typeof newPetSize)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(PET_SIZE_LABELS).map(([val, label]) => (
+                        <SelectItem key={val} value={val}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             ) : (
               <div className="space-y-3">
@@ -243,43 +274,56 @@ export default function WalkInPage() {
                     placeholder="Type name or phone (e.g. Sarah, James)..."
                     value={searchPhone}
                     onChange={(e) => {
-                      setSearchPhone(e.target.value);
-                      const match = customers.find(
-                        (c) =>
-                          c.phone.includes(e.target.value) ||
-                          c.name.toLowerCase().includes(e.target.value.toLowerCase())
-                      );
-                      if (match) {
-                        setSelectedCustomerId(match.id);
-                        if (match.pets.length > 0) setSelectedPetId(match.pets[0].id);
-                      }
+                      const q = e.target.value;
+                      setSearchPhone(q);
+                      const needle = q.trim().toLowerCase();
+                      const match = needle
+                        ? customers.find(
+                            (c) => c.phone.includes(q.trim()) || c.name.toLowerCase().includes(needle)
+                          )
+                        : undefined;
+                      // No match -> nothing selected (never silently book someone else)
+                      setSelectedCustomerId(match ? match.id : "");
+                      setSelectedPetId(match?.pets[0]?.id ?? "");
                     }}
                   />
                 </div>
+
+                {searchPhone.trim() && !activeCustomer && (
+                  <p className="text-xs text-muted-foreground">
+                    No owner found. Use &quot;Quick Add New Owner&quot; above.
+                  </p>
+                )}
 
                 {activeCustomer && (
                   <div className="rounded-lg border bg-muted/40 p-3 space-y-2">
                     <p className="text-sm font-medium text-foreground">
                       Selected: <span className="font-semibold text-primary">{activeCustomer.name}</span> ({activeCustomer.phone})
                     </p>
-                    <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">Select Pet *</Label>
-                      <Select
-                        value={selectedPetId || (activeCustomer.pets[0]?.id ?? "")}
-                        onValueChange={setSelectedPetId}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Choose pet" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {activeCustomer.pets.map((p) => (
-                            <SelectItem key={p.id} value={p.id}>
-                              {p.name} ({p.breed} - {p.size})
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
+                    {activeCustomer.pets.length === 0 ? (
+                      <p className="text-xs text-destructive">
+                        No pets on file for this owner. Add a pet to their profile first, or use Quick Add New Owner.
+                      </p>
+                    ) : (
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Select Pet *</Label>
+                        <Select
+                          value={activePet?.id ?? ""}
+                          onValueChange={setSelectedPetId}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Choose pet" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {activeCustomer.pets.map((p) => (
+                              <SelectItem key={p.id} value={p.id}>
+                                {p.name} ({p.breed} - {p.size})
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -293,11 +337,7 @@ export default function WalkInPage() {
                     <SelectValue placeholder="Select service" />
                   </SelectTrigger>
                   <SelectContent>
-                    {MOCK_SERVICES.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        {s.name} (${s.price} - {s.duration}m)
-                      </SelectItem>
-                    ))}
+                    <ServiceSelectItems services={services} />
                   </SelectContent>
                 </Select>
               </div>
@@ -305,7 +345,7 @@ export default function WalkInPage() {
               <div className="space-y-1.5">
                 <Label>Assign Groomer *</Label>
                 <Select
-                  value={selectedGroomerId || (staff[0]?.id ?? "g1")}
+                  value={selectedGroomerId}
                   onValueChange={setSelectedGroomerId}
                 >
                   <SelectTrigger>
@@ -321,6 +361,8 @@ export default function WalkInPage() {
                 </Select>
               </div>
             </div>
+
+            {error && <p className="text-sm text-destructive">{error}</p>}
 
             <div className="flex justify-end gap-2 pt-4">
               <Button type="button" variant="outline" onClick={() => router.back()}>

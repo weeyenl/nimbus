@@ -34,6 +34,7 @@ import {
   getAppointments,
   PaymentRecord,
   MockAppointment,
+  localDateStr,
 } from "@/lib/mock-data";
 
 export default function ReportsPage() {
@@ -46,7 +47,7 @@ export default function ReportsPage() {
     setAppointments(getAppointments());
   }, []);
 
-  const todayStr = new Date().toISOString().split("T")[0];
+  const todayStr = localDateStr();
 
   // Filter payments
   const filteredPayments = payments.filter((p) => {

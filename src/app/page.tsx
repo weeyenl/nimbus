@@ -23,6 +23,7 @@ import {
   getCustomers,
   MockAppointment,
   PaymentRecord,
+  localDateStr,
 } from "@/lib/mock-data";
 import { APPOINTMENT_STATUS_COLORS, APPOINTMENT_STATUS_LABELS } from "@/lib/utils";
 
@@ -37,7 +38,7 @@ export default function DashboardPage() {
     setCustomerCount(getCustomers().length);
   }, []);
 
-  const todayStr = new Date().toISOString().split("T")[0];
+  const todayStr = localDateStr();
   const todaysAppointments = appointments.filter((apt) => apt.dateStr === todayStr);
   const inProgressCount = todaysAppointments.filter((apt) => apt.status === "IN_PROGRESS").length;
   const todaysRevenue = payments

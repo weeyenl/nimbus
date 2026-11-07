@@ -42,9 +42,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  MOCK_SERVICES,
-  MOCK_ADDONS,
   MEMBERSHIP_TIERS,
+  getServiceCategories,
+  isFlatRate,
   calculateServicePrice,
   getServices,
   saveService,
@@ -75,6 +75,11 @@ export default function ServicesPage() {
   const [servicePrice, setServicePrice] = useState<number>(65);
   const [serviceDuration, setServiceDuration] = useState<number>(60);
   const [serviceDesc, setServiceDesc] = useState("");
+  const [serviceCategory, setServiceCategory] = useState("Grooming");
+  const [newCategoryText, setNewCategoryText] = useState("");
+  const [serviceFlat, setServiceFlat] = useState(false);
+  const [categories, setCategories] = useState<string[]>(["Grooming"]);
+  const NEW_CATEGORY = "__new__";
 
   // Add-on Edit / Add Dialog State
   const [isAddonModalOpen, setIsAddonModalOpen] = useState(false);
@@ -88,6 +93,7 @@ export default function ServicesPage() {
     const a = getAddons();
     setServices(s);
     setAddons(a);
+    setCategories(getServiceCategories());
     if (!calcServiceId && s.length > 0) {
       setCalcServiceId(s[0].id);
     }
@@ -107,6 +113,9 @@ export default function ServicesPage() {
     setServicePrice(65);
     setServiceDuration(60);
     setServiceDesc("");
+    setServiceCategory("Grooming");
+    setNewCategoryText("");
+    setServiceFlat(false);
     setIsServiceModalOpen(true);
   };
 
@@ -116,6 +125,9 @@ export default function ServicesPage() {
     setServicePrice(service.basePrice);
     setServiceDuration(service.duration);
     setServiceDesc(service.description);
+    setServiceCategory(service.category || "Grooming");
+    setNewCategoryText("");
+    setServiceFlat(isFlatRate(service));
     setIsServiceModalOpen(true);
   };
 
@@ -123,27 +135,26 @@ export default function ServicesPage() {
     e.preventDefault();
     if (!serviceName.trim()) return;
 
-    if (editingServiceId) {
-      const updated: MockService = {
-        id: editingServiceId,
-        name: serviceName.trim(),
-        basePrice: Number(servicePrice) || 0,
-        price: Number(servicePrice) || 0,
-        duration: Number(serviceDuration) || 30,
-        description: serviceDesc.trim(),
-      };
-      saveService(updated);
-    } else {
-      const newService: MockService = {
-        id: `srv-${Date.now()}`,
-        name: serviceName.trim(),
-        basePrice: Number(servicePrice) || 0,
-        price: Number(servicePrice) || 0,
-        duration: Number(serviceDuration) || 30,
-        description: serviceDesc.trim(),
-      };
-      addService(newService);
+    const category =
+      serviceCategory === NEW_CATEGORY ? newCategoryText.trim() : serviceCategory;
+    if (!category) {
+      alert("Please type a name for the new category.");
+      return;
     }
+
+    const record: MockService = {
+      id: editingServiceId || `srv-${Date.now()}`,
+      name: serviceName.trim(),
+      category,
+      flatRate: serviceFlat,
+      basePrice: Number(servicePrice) || 0,
+      price: Number(servicePrice) || 0,
+      duration: Number(serviceDuration) || 30,
+      description: serviceDesc.trim(),
+    };
+
+    if (editingServiceId) saveService(record);
+    else addService(record);
 
     refreshData();
     setIsServiceModalOpen(false);
@@ -320,8 +331,13 @@ export default function ServicesPage() {
           </Card>
 
           {/* Services List Grid */}
+          {categories
+            .filter((cat) => services.some((sv) => (sv.category || "Grooming") === cat))
+            .map((cat) => (
+          <div key={cat} className="space-y-3">
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">{cat}</h3>
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {services.map((service) => (
+            {services.filter((sv) => (sv.category || "Grooming") === cat).map((service) => (
               <Card key={service.id} className="shadow-sm flex flex-col justify-between hover:border-primary/50 transition-colors">
                 <div>
                   <CardHeader className="pb-2">
@@ -335,12 +351,19 @@ export default function ServicesPage() {
                       </div>
                       <div className="text-right">
                         <span className="text-xl font-bold text-primary">${service.basePrice}</span>
-                        <span className="text-[10px] text-muted-foreground block">Base (Small)</span>
+                        <span className="text-[10px] text-muted-foreground block">
+                          {isFlatRate(service) ? "Fixed price" : "Base (Small)"}
+                        </span>
                       </div>
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-3 pt-2">
                     <p className="text-xs text-muted-foreground line-clamp-2">{service.description}</p>
+                    {isFlatRate(service) ? (
+                    <div className="rounded-md bg-muted/40 p-2.5 text-[11px] border text-muted-foreground">
+                      Fixed price — same for every pet size and coat.
+                    </div>
+                    ) : (
                     <div className="rounded-md bg-muted/40 p-2.5 text-[11px] space-y-1 border">
                       <span className="font-semibold text-foreground block text-xs">Size & Coat Additions:</span>
                       <div className="flex justify-between text-muted-foreground">
@@ -356,6 +379,7 @@ export default function ServicesPage() {
                         <span>Curly / Double Coat:</span> <span className="font-medium text-foreground">+$10</span>
                       </div>
                     </div>
+                    )}
                   </CardContent>
                 </div>
 
@@ -381,6 +405,8 @@ export default function ServicesPage() {
               </Card>
             ))}
           </div>
+          </div>
+          ))}
         </TabsContent>
 
         {/* TAB 2: ADD-ONS & EXTRA CHARGES */}
@@ -514,9 +540,34 @@ export default function ServicesPage() {
               />
             </div>
 
+            <div className="space-y-2">
+              <Label>Category *</Label>
+              <Select value={serviceCategory} onValueChange={setServiceCategory}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {categories.map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {c}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value={NEW_CATEGORY}>+ New category…</SelectItem>
+                </SelectContent>
+              </Select>
+              {serviceCategory === NEW_CATEGORY && (
+                <Input
+                  placeholder="e.g. Training, Daycare, Boarding"
+                  value={newCategoryText}
+                  onChange={(e) => setNewCategoryText(e.target.value)}
+                  autoFocus
+                />
+              )}
+            </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="srvPrice">Base Price ($) *</Label>
+                <Label htmlFor="srvPrice">{serviceFlat ? "Price ($) *" : "Base Price ($) *"}</Label>
                 <Input
                   id="srvPrice"
                   type="number"
@@ -541,6 +592,22 @@ export default function ServicesPage() {
                 />
               </div>
             </div>
+
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={serviceFlat}
+                onChange={(e) => setServiceFlat(e.target.checked)}
+              />
+              <span>
+                Fixed price
+                <span className="block text-xs text-muted-foreground">
+                  Charge exactly this price for every pet. Untick for grooming-style pricing that adds
+                  size and coat surcharges.
+                </span>
+              </span>
+            </label>
 
             <div className="space-y-2">
               <Label htmlFor="srvDesc">Description</Label>
