@@ -717,8 +717,11 @@ function readCache<T>(key: string): T[] | null {
 function readCollection<T>(key: string, demoDefaults: T[]): T[] {
   if (typeof window === "undefined") return isSupabaseConfigured ? [] : demoDefaults;
   const cached = readCache<T>(key);
-  if (cached && cached.length > 0) return cached;
-  // If Supabase is configured but this browser cache hasn't hydrated or is empty, use defaults so PINs work immediately
+  // When connected to Supabase, cached is what came from the database (even if empty []).
+  if (cached !== null) return cached;
+  // If Supabase is configured but not yet loaded, return empty (real DB mode, no mock pollution)
+  if (isSupabaseConfigured) return [];
+  // Demo mode only (no Supabase configured): use mock data
   localStorage.setItem(key, JSON.stringify(demoDefaults));
   return demoDefaults;
 }
@@ -815,8 +818,8 @@ export async function hydrateFromCloud(): Promise<void> {
 
 // 1. APPOINTMENTS
 export function getAppointments(): MockAppointment[] {
-  if (typeof window === "undefined") return MOCK_APPOINTMENTS_DATA;
-  return readCollection(STORAGE_KEYS.APPOINTMENTS, MOCK_APPOINTMENTS_DATA);
+  if (typeof window === "undefined") return isSupabaseConfigured ? [] : MOCK_APPOINTMENTS_DATA;
+  return readCollection(STORAGE_KEYS.APPOINTMENTS, isSupabaseConfigured ? [] : MOCK_APPOINTMENTS_DATA);
 }
 
 export function saveAppointment(apt: MockAppointment): void {
@@ -845,8 +848,8 @@ export function saveStaff(staff: MockStaff): void {
 
 // 3. CUSTOMERS
 export function getCustomers(): MockCustomer[] {
-  if (typeof window === "undefined") return MOCK_CUSTOMERS_DATA;
-  return readCollection(STORAGE_KEYS.CUSTOMERS, MOCK_CUSTOMERS_DATA);
+  if (typeof window === "undefined") return isSupabaseConfigured ? [] : MOCK_CUSTOMERS_DATA;
+  return readCollection(STORAGE_KEYS.CUSTOMERS, isSupabaseConfigured ? [] : MOCK_CUSTOMERS_DATA);
 }
 
 export function saveCustomer(customer: MockCustomer): void {
@@ -857,8 +860,8 @@ export function saveCustomer(customer: MockCustomer): void {
 
 // 4. MEMBERSHIPS
 export function getMemberships(): CustomerMembership[] {
-  if (typeof window === "undefined") return INITIAL_MEMBERSHIPS;
-  return readCollection(STORAGE_KEYS.MEMBERSHIPS, INITIAL_MEMBERSHIPS);
+  if (typeof window === "undefined") return isSupabaseConfigured ? [] : INITIAL_MEMBERSHIPS;
+  return readCollection(STORAGE_KEYS.MEMBERSHIPS, isSupabaseConfigured ? [] : INITIAL_MEMBERSHIPS);
 }
 
 export function getCustomerMembership(customerId: string): CustomerMembership | undefined {
@@ -962,8 +965,8 @@ export function deductPackageAddonAllowance(
 
 // 5. GROOMING RECORDS
 export function getGroomingRecords(petId?: string): GroomingRecord[] {
-  if (typeof window === "undefined") return INITIAL_GROOMING_RECORDS;
-  const records = readCollection(STORAGE_KEYS.GROOMING_RECORDS, INITIAL_GROOMING_RECORDS);
+  if (typeof window === "undefined") return isSupabaseConfigured ? [] : INITIAL_GROOMING_RECORDS;
+  const records = readCollection(STORAGE_KEYS.GROOMING_RECORDS, isSupabaseConfigured ? [] : INITIAL_GROOMING_RECORDS);
   return petId ? records.filter((r) => r.petId === petId) : records;
 }
 
@@ -975,8 +978,8 @@ export function saveGroomingRecord(record: GroomingRecord): void {
 
 // 6. PAYMENTS & INVOICES
 export function getPayments(): PaymentRecord[] {
-  if (typeof window === "undefined") return INITIAL_PAYMENTS;
-  return readCollection(STORAGE_KEYS.PAYMENTS, INITIAL_PAYMENTS);
+  if (typeof window === "undefined") return isSupabaseConfigured ? [] : INITIAL_PAYMENTS;
+  return readCollection(STORAGE_KEYS.PAYMENTS, isSupabaseConfigured ? [] : INITIAL_PAYMENTS);
 }
 
 export function savePayment(payment: PaymentRecord): void {
