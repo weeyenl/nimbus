@@ -83,7 +83,7 @@ function NewAppointmentContent() {
     const svcs = getServices();
     setServices(svcs);
     if (svcs.length > 0) setSelectedServiceId(svcs[0].id);
-    const groomers = getStaff().filter((s) => s.role === "GROOMER" && s.isActive !== false);
+    const groomers = getStaff().filter((s) => s.isActive !== false);
     setStaff(groomers);
     if (groomers.length > 0) setSelectedGroomerId(groomers[0].id);
     // eslint-disable-next-line react-hooks/exhaustive-deps

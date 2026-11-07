@@ -70,7 +70,7 @@ export default function WalkInPage() {
     const svcs = getServices();
     setServices(svcs);
     if (svcs.length > 0) setSelectedServiceId(svcs[0].id);
-    const staffList = getStaff().filter((s) => s.role === "GROOMER" && s.isActive !== false);
+    const staffList = getStaff().filter((s) => s.isActive !== false);
     setStaff(staffList);
     if (staffList.length > 0) setSelectedGroomerId(staffList[0].id);
   }, []);
