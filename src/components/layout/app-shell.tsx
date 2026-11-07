@@ -134,13 +134,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         return;
       }
       if (cancelled) return;
+      
+      // Check if a staff member PIN logged in or was selected
+      const activeStaffId = localStorage.getItem("nimbus_active_staff_id");
+      const allStaff = getStaff();
+      const pinStaff = activeStaffId ? allStaff.find((s) => s.id === activeStaffId) : undefined;
+
       const email = user.email || "";
-      const staffMatch = getStaff().find((s) => s.email?.toLowerCase() === email.toLowerCase());
+      const staffMatch = pinStaff || allStaff.find((s) => s.email?.toLowerCase() === email.toLowerCase());
       const metaRole = (user.user_metadata?.role || user.app_metadata?.role) as UserRole | undefined;
       const role: UserRole =
         (staffMatch?.role as UserRole | undefined) ||
         (metaRole && ["OWNER", "RECEPTIONIST", "GROOMER"].includes(metaRole) ? metaRole : "OWNER");
-      setUserEmail(email);
+      
+      setUserEmail(staffMatch ? `${staffMatch.name} (${staffMatch.role})` : email);
       setCurrentRole(role);
       setPhase("ready");
     })();
@@ -175,6 +182,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     localStorage.removeItem("nimbus_current_role");
+    localStorage.removeItem("nimbus_active_staff_id");
     router.replace("/login");
   };
 

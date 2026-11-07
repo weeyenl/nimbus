@@ -36,6 +36,7 @@ export interface MockStaff {
   role: "OWNER" | "GROOMER" | "RECEPTIONIST";
   phone: string;
   email: string;
+  pin?: string;
   isActive: boolean;
   schedule: Record<string, string>;
 }
@@ -502,6 +503,7 @@ export const MOCK_STAFF_DATA: MockStaff[] = [
     role: "GROOMER",
     phone: "+65 9111 2222",
     email: "amy@doglab.com",
+    pin: "1111",
     isActive: true,
     schedule: {
       Mon: "09:00-18:00",
@@ -519,6 +521,7 @@ export const MOCK_STAFF_DATA: MockStaff[] = [
     role: "GROOMER",
     phone: "+65 9222 3333",
     email: "ben@doglab.com",
+    pin: "2222",
     isActive: true,
     schedule: {
       Mon: "09:00-18:00",
@@ -536,6 +539,7 @@ export const MOCK_STAFF_DATA: MockStaff[] = [
     role: "RECEPTIONIST",
     phone: "+65 9333 4444",
     email: "cindy@doglab.com",
+    pin: "3333",
     isActive: true,
     schedule: {
       Mon: "09:00-18:00",

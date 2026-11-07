@@ -51,6 +51,7 @@ export default function StaffPage() {
   const [role, setRole] = useState<"GROOMER" | "RECEPTIONIST" | "OWNER">("GROOMER");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
+  const [pin, setPin] = useState("");
   const [isActive, setIsActive] = useState(true);
   const [schedule, setSchedule] = useState<Record<string, string>>({
     Mon: "09:00-18:00",
@@ -76,6 +77,7 @@ export default function StaffPage() {
     setRole("GROOMER");
     setPhone("+65 9123 4567");
     setEmail("");
+    setPin("");
     setIsActive(true);
     setSchedule({
       Mon: "09:00-18:00",
@@ -95,6 +97,7 @@ export default function StaffPage() {
     setRole(staff.role);
     setPhone(staff.phone);
     setEmail(staff.email);
+    setPin(staff.pin || "");
     setIsActive(staff.isActive);
     setSchedule(
       staff.schedule || {
@@ -128,6 +131,7 @@ export default function StaffPage() {
         role,
         phone: phone.trim() || "+65 9000 0000",
         email: email.trim() || `${name.toLowerCase().replace(/\s+/g, ".")}@doglab.com`,
+        pin: pin.trim() || undefined,
         isActive,
         schedule,
       };
@@ -139,6 +143,7 @@ export default function StaffPage() {
         role,
         phone: phone.trim() || "+65 9000 0000",
         email: email.trim() || `${name.toLowerCase().replace(/\s+/g, ".")}@doglab.com`,
+        pin: pin.trim() || undefined,
         isActive: true,
         schedule,
       };
@@ -205,6 +210,13 @@ export default function StaffPage() {
                       <Mail className="h-3 w-3 shrink-0" />
                       <span className="truncate">{staff.email}</span>
                     </div>
+                    {staff.pin && (
+                      <div className="flex items-center gap-1.5 text-xs text-primary font-medium mt-1">
+                        <Badge variant="outline" className="text-[10px] px-1 py-0 border-primary/40 bg-primary/5">
+                          PIN Set: ••••
+                        </Badge>
+                      </div>
+                    )}
                   </div>
                 </div>
               </CardHeader>
@@ -327,6 +339,21 @@ export default function StaffPage() {
                   onChange={(e) => setEmail(e.target.value)}
                 />
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="staffPin">Staff Login PIN (4 - 6 Digits)</Label>
+              <Input
+                id="staffPin"
+                type="password"
+                maxLength={6}
+                placeholder="e.g. 1234 (for quick tablet keypad sign-in)"
+                value={pin}
+                onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Allows fast front-desk login on salon tablets without typing full email passwords.
+              </p>
             </div>
 
             {/* Weekly Schedule Planner */}
