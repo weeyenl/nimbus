@@ -38,7 +38,26 @@ import Link from "next/link";
 function NewAppointmentContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const initialDate = searchParams?.get("date") || localDateStr();
+  const rawDate = searchParams?.get("date") || "";
+  const rawTime = searchParams?.get("time") || "";
+
+  let parsedDate = "";
+  let parsedTime = rawTime;
+
+  if (rawDate) {
+    if (rawDate.includes("T")) {
+      const [d, t] = rawDate.split("T");
+      parsedDate = d;
+      if (!parsedTime && t) {
+        parsedTime = t.slice(0, 5);
+      }
+    } else {
+      parsedDate = rawDate.slice(0, 10);
+    }
+  }
+
+  const initialDate = parsedDate || localDateStr();
+  const initialTime = parsedTime || "10:00";
   const presetCustomerId = searchParams?.get("customerId") || "";
   const presetPetId = searchParams?.get("petId") || "";
 
@@ -84,7 +103,7 @@ function NewAppointmentContent() {
     setError("");
     const formData = new FormData(e.currentTarget);
     const dateStr = (formData.get("date") as string) || initialDate;
-    const startTimeStr = (formData.get("time") as string) || "10:00";
+    const startTimeStr = (formData.get("time") as string) || initialTime;
     const notes = formData.get("notes") as string;
 
     const groomer = staff.find((g) => g.id === selectedGroomerId);
@@ -253,6 +272,7 @@ function NewAppointmentContent() {
                   name="date"
                   type="date"
                   defaultValue={initialDate}
+                  key={`date-${initialDate}`}
                   required
                 />
               </div>
@@ -263,7 +283,8 @@ function NewAppointmentContent() {
                   id="time"
                   name="time"
                   type="time"
-                  defaultValue="10:00"
+                  defaultValue={initialTime}
+                  key={`time-${initialTime}`}
                   required
                 />
               </div>

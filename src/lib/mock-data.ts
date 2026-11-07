@@ -733,15 +733,17 @@ function reportSyncError(message: string) {
 
 function commit<T extends { id: string }>(key: string, next: T[]): void {
   const prev = readCache<T>(key) ?? [];
-  localStorage.setItem(key, JSON.stringify(next));
-  if (!isSupabaseConfigured) return;
-
   const prevJson = new Map(prev.map((r) => [r.id, JSON.stringify(r)]));
   const upserts = next
     .filter((r) => prevJson.get(r.id) !== JSON.stringify(r))
     .map((r) => ({ id: r.id, data: r }));
   const nextIds = new Set(next.map((r) => r.id));
   const deletes = prev.filter((r) => !nextIds.has(r.id)).map((r) => r.id);
+
+  // Update local cache
+  localStorage.setItem(key, JSON.stringify(next));
+  if (!isSupabaseConfigured) return;
+
   if (upserts.length === 0 && deletes.length === 0) return;
 
   const table = tableOf(key);

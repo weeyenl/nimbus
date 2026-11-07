@@ -111,7 +111,19 @@ export default function CalendarPage() {
             router.push(`/appointments/${info.event.id}`);
           }}
           dateClick={(info) => {
-            router.push(`/appointments/new?date=${info.dateStr}`);
+            let dateVal = info.dateStr;
+            let timeVal = "";
+            if (info.dateStr.includes("T")) {
+              const [d, t] = info.dateStr.split("T");
+              dateVal = d;
+              timeVal = t.slice(0, 5);
+            } else {
+              dateVal = info.dateStr.slice(0, 10);
+            }
+            const params = new URLSearchParams();
+            if (dateVal) params.set("date", dateVal);
+            if (timeVal) params.set("time", timeVal);
+            router.push(`/appointments/new?${params.toString()}`);
           }}
           eventContent={(arg) => {
             const props = arg.event.extendedProps;
