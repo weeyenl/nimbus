@@ -102,7 +102,7 @@ create table public.backups (
   updated_at timestamptz not null default now()
 );
 
--- 3. ENABLE ROW LEVEL SECURITY & ACCESS POLICIES FOR AUTHENTICATED STAFF
+-- 3. DISABLE ROW LEVEL SECURITY FOR STAFF PIN TABLET / DIRECT ACCESS
 do $$
 declare
   t text;
@@ -122,10 +122,7 @@ begin
     'backups'
   ]
   loop
-    execute format('alter table public.%I enable row level security', t);
     execute format('drop policy if exists "staff full access" on public.%I', t);
-    execute format(
-      'create policy "staff full access" on public.%I
-         for all to authenticated using (true) with check (true)', t);
+    execute format('alter table public.%I disable row level security', t);
   end loop;
 end $$;

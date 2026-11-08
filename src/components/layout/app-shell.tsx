@@ -118,6 +118,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // Demo mode: sync remembered role & active demo PIN staff name
   useEffect(() => {
     if (isSupabaseConfigured) return;
+    if (isLoginPage) return;
+
+    if (localStorage.getItem("nimbus_pin_locked") === "1") {
+      router.replace("/login");
+      return;
+    }
+
     const saved = localStorage.getItem("nimbus_current_role") as UserRole | null;
     const activeId = localStorage.getItem("nimbus_active_staff_id");
     const staffList = getStaff();
@@ -133,9 +140,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       setDisplayStaffLabel("");
     }
     setPhase("ready");
-  }, [pathname]);
+  }, [pathname, isLoginPage, router]);
 
-  // Cloud mode: require real Supabase Auth session, enforce PIN lock if active, then hydrate
+  // Cloud mode: allow Staff PIN session OR Supabase Auth session, enforce PIN lock if active, then hydrate
   useEffect(() => {
     if (!isSupabaseConfigured) return;
     if (isLoginPage) return;
@@ -147,15 +154,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     (async () => {
       const { data } = await supabase.auth.getSession();
       const user = data.session?.user;
+      const activeStaffId = localStorage.getItem("nimbus_active_staff_id");
+      const isLocked = localStorage.getItem("nimbus_pin_locked") === "1";
 
-      if (!user) {
+      if (isLocked || (!user && !activeStaffId)) {
         localStorage.removeItem("nimbus_active_staff_id");
-        localStorage.removeItem("nimbus_pin_locked");
-        router.replace("/login");
-        return;
-      }
-
-      if (localStorage.getItem("nimbus_pin_locked") === "1") {
         router.replace("/login");
         return;
       }
@@ -164,7 +167,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         await hydrateFromCloud();
       } catch (err) {
         if (!cancelled) {
-          setLoadError(err instanceof Error ? err.message : String(err));
+          const msg = err instanceof Error ? err.message : String(err);
+          const rlsHint =
+            !user && (msg.toLowerCase().includes("row-level security") || msg.toLowerCase().includes("permission") || msg.toLowerCase().includes("policy"))
+              ? " (RLS is enabled on Supabase tables — run the disable RLS SQL command in Supabase SQL Editor for PIN-only login, or sign in with Email & Password.)"
+              : "";
+          setLoadError(msg + rlsHint);
           setPhase("error");
         }
         return;
@@ -172,19 +180,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       if (cancelled) return;
 
       const allStaff = getStaff();
-      const activeStaffId = localStorage.getItem("nimbus_active_staff_id");
       const pinStaff = activeStaffId
         ? allStaff.find((s) => s.id === activeStaffId)
         : undefined;
 
-      if (pinStaff && pinStaff.isActive === false) {
+      if (activeStaffId && (!pinStaff || pinStaff.isActive === false)) {
         localStorage.removeItem("nimbus_active_staff_id");
-        setLoadError("This staff profile is marked inactive. Sign in with an active staff account.");
+        if (!user) {
+          router.replace("/login");
+          return;
+        }
+        setLoadError("This staff profile is marked inactive or was removed. Sign in with an active staff PIN.");
         setPhase("error");
         return;
       }
 
-      const email = user.email || "";
+      const email = user?.email || "";
       const emailStaff = email
         ? allStaff.find((s) => s.email?.toLowerCase() === email.toLowerCase())
         : undefined;
@@ -196,7 +207,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      const metaRole = (user.user_metadata?.role || user.app_metadata?.role) as UserRole | undefined;
+      const metaRole = (user?.user_metadata?.role || user?.app_metadata?.role) as UserRole | undefined;
       const validMetaRole =
         metaRole && ["OWNER", "RECEPTIONIST", "GROOMER"].includes(metaRole) ? metaRole : undefined;
 
@@ -209,7 +220,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             s.role === "OWNER" &&
             (Boolean(s.pinHash) || (s.email && s.email.toLowerCase() !== "owner@doglab.com"))
         );
-        if (hasConfiguredOwner) {
+        if (hasConfiguredOwner && user) {
           setLoadError(
             `Your account (${email || "unknown"}) is not linked to an active staff profile. Ask the salon owner to add your email under Staff & Shifts.`
           );
@@ -254,8 +265,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!isSupabaseConfigured) return;
     const { data } = supabase.auth.onAuthStateChange((event) => {
-      if (event === "SIGNED_OUT") {
-        localStorage.removeItem("nimbus_active_staff_id");
+      if (event === "SIGNED_OUT" && !localStorage.getItem("nimbus_active_staff_id")) {
         localStorage.removeItem("nimbus_pin_locked");
         router.replace("/login");
       }
@@ -321,12 +331,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   };
 
   const handleSignOut = async () => {
-    if (isSupabaseConfigured) {
-      await supabase.auth.signOut();
-    }
+    setSidebarOpen(false);
     localStorage.removeItem("nimbus_current_role");
     localStorage.removeItem("nimbus_active_staff_id");
     localStorage.removeItem("nimbus_pin_locked");
+    if (isSupabaseConfigured) {
+      await supabase.auth.signOut();
+    }
     router.replace("/login");
   };
 

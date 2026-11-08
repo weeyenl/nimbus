@@ -59,7 +59,6 @@ import { COAT_TYPES, formatPrice, roundCurrency } from "@/lib/utils";
 import {
   newId,
   localDateStr,
-  MEMBERSHIP_TIERS,
   getMembershipTiers,
   saveMembershipTier,
   deleteMembershipTier,
@@ -780,7 +779,7 @@ export default function ServicesPage() {
                     {formatPrice(calculatedRate)}
                   </span>
                   <span className="text-[11px] text-muted-foreground block">
-                    {isFlatRate(selectedCalcService)
+                    {selectedCalcService && isFlatRate(selectedCalcService)
                       ? "Fixed flat rate"
                       : matchedCalcBreed
                       ? `Breed rule: ${matchedCalcBreed.breed}`
@@ -792,9 +791,16 @@ export default function ServicesPage() {
           </Card>
 
           {/* Services List Grid */}
-          {categories
-            .filter((cat) => services.some((sv) => (sv.category || "Grooming") === cat))
-            .map((cat) => (
+          {services.length === 0 ? (
+            <Card className="shadow-sm">
+              <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                No services configured yet. Click &ldquo;Add Service&rdquo; to create your first service.
+              </CardContent>
+            </Card>
+          ) : (
+            categories
+              .filter((cat) => services.some((sv) => (sv.category || "Grooming") === cat))
+              .map((cat) => (
               <div key={cat} className="space-y-3">
                 <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
                   {cat}
@@ -929,13 +935,21 @@ export default function ServicesPage() {
                     })}
                 </div>
               </div>
-            ))}
+            ))
+          )}
         </TabsContent>
 
         {/* TAB 2: ADD-ONS & EXTRA CHARGES */}
         <TabsContent value="addons" className="space-y-4 pt-4">
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {addons.map((addon) => (
+          {addons.length === 0 ? (
+            <Card className="shadow-sm">
+              <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                No add-ons configured yet. Click &ldquo;Add Add-on&rdquo; to create your first add-on.
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {addons.map((addon) => (
               <Card
                 key={addon.id}
                 className="shadow-sm flex flex-col justify-between hover:border-primary/50 transition-colors"
@@ -984,7 +998,8 @@ export default function ServicesPage() {
                 </div>
               </Card>
             ))}
-          </div>
+            </div>
+          )}
         </TabsContent>
 
         {/* TAB 3: PROMO CODES & DISCOUNTS */}
@@ -1124,8 +1139,13 @@ export default function ServicesPage() {
               </Button>
             </div>
 
+            {membershipTiers.length === 0 ? (
+              <div className="text-center py-8 text-sm text-muted-foreground">
+                No membership tiers or session packages configured yet. Click &ldquo;Add Tier / Package&rdquo; to create one.
+              </div>
+            ) : (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              {(membershipTiers.length > 0 ? membershipTiers : MEMBERSHIP_TIERS).map((tier) => {
+              {membershipTiers.map((tier) => {
                 const isSessionPkg = tier.packageType === "SESSIONS";
                 const matchingServices =
                   isSessionPkg && tier.applicableServiceIds?.length
@@ -1244,6 +1264,7 @@ export default function ServicesPage() {
                 );
               })}
             </div>
+            )}
             <p className="text-[11px] text-muted-foreground text-center mt-6">
               * Prepaid credit tiers deduct balance at checkout; Session Packages auto-deduct 1 session per qualifying visit.
             </p>

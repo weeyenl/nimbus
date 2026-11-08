@@ -302,6 +302,16 @@ export default function StaffPage() {
       </div>
 
       {/* Staff List */}
+      {staffList.length === 0 ? (
+        <Card className="shadow-sm">
+          <CardContent className="py-12 text-center space-y-2">
+            <p className="text-sm font-medium">No staff members in database yet</p>
+            <p className="text-xs text-muted-foreground">
+              Click &ldquo;Add Staff Member&rdquo; to create groomer, receptionist, or owner profiles and PINs.
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {staffList.map((staff) => {
           const active = staff.isActive !== false;
@@ -422,6 +432,7 @@ export default function StaffPage() {
           );
         })}
       </div>
+      )}
 
       {/* Staff Edit/Add Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>

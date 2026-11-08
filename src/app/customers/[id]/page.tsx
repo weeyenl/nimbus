@@ -78,7 +78,6 @@ import {
   isMembershipExpired,
   getMembershipTiers,
   getPetEffectiveVaccinationExpiry,
-  MEMBERSHIP_TIERS,
   localDateStr,
   newId,
   MembershipTier,
@@ -1215,8 +1214,17 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
             <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
               Salon Packages
             </span>
+            {membershipTiers.length === 0 ? (
+              <p className="text-xs text-muted-foreground rounded-lg border border-dashed p-3">
+                No membership tiers or session packages configured yet. Create reusable tiers under{" "}
+                <Link href="/services" className="underline font-medium text-primary">
+                  Services &amp; Pricing
+                </Link>
+                , or assign a custom package below.
+              </p>
+            ) : (
             <div className="grid gap-3 sm:grid-cols-2">
-              {(membershipTiers.length > 0 ? membershipTiers : MEMBERSHIP_TIERS).map((tier) => (
+              {membershipTiers.map((tier) => (
                 <div
                   key={tier.id}
                   className="border-2 rounded-xl p-4 flex flex-col justify-between hover:border-primary transition-all bg-card"
@@ -1253,6 +1261,7 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
                 </div>
               ))}
             </div>
+            )}
           </div>
 
           <div className="space-y-3 pt-3 border-t">

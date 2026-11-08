@@ -363,8 +363,8 @@ export function calculateServicePrice(
   coatType: string = "SHORT",
   breed?: string
 ): number {
-  const services = typeof window !== "undefined" ? getServices() : MOCK_SERVICES;
-  const service = services.find((s) => s.id === serviceId) || services[0] || MOCK_SERVICES[0];
+  const services = typeof window !== "undefined" ? getServices() : isSupabaseConfigured ? [] : MOCK_SERVICES;
+  const service = services.find((s) => s.id === serviceId) || services[0];
   if (!service) return 0;
 
   if (isFlatRate(service)) {
@@ -1174,41 +1174,6 @@ export async function hydrateFromCloud(): Promise<void> {
   );
 
   const byKey = new Map<string, unknown[]>(loaded);
-
-  // Seed each default catalogue independently if empty on first boot
-  if (!localStorage.getItem("nimbus_catalogue_seeded")) {
-    const cloudStaffDefaults: MockStaff[] = MOCK_STAFF_DATA.map((s) => ({
-      ...s,
-      pinHash: undefined,
-      pin: undefined,
-    }));
-
-    const seedTargets: [string, readonly { id: string }[]][] = [
-      [STORAGE_KEYS.SERVICES, MOCK_SERVICES],
-      [STORAGE_KEYS.ADDONS, MOCK_ADDONS],
-      [STORAGE_KEYS.MEMBERSHIP_TIERS, MEMBERSHIP_TIERS],
-      [STORAGE_KEYS.PROMO_CODES, INITIAL_PROMO_CODES],
-    ];
-    if ((byKey.get(STORAGE_KEYS.STAFF) || []).length === 0) {
-      seedTargets.push([STORAGE_KEYS.STAFF, cloudStaffDefaults]);
-    }
-
-    let seededAny = false;
-    for (const [key, defaults] of seedTargets) {
-      if ((byKey.get(key) || []).length === 0) {
-        const { error } = await supabase
-          .from(tableOf(key))
-          .upsert(defaults.map((d) => ({ id: d.id, data: d })));
-        if (error) throw new Error(`${tableOf(key)}: ${error.message}`);
-        byKey.set(key, [...defaults]);
-        seededAny = true;
-      }
-    }
-    if (seededAny || (byKey.get(STORAGE_KEYS.SERVICES) || []).length > 0) {
-      localStorage.setItem("nimbus_catalogue_seeded", "1");
-    }
-  }
-
   byKey.forEach((rows, key) => localStorage.setItem(key, JSON.stringify(rows)));
   dispatchDataUpdated();
 }
@@ -1384,7 +1349,8 @@ export function findPetById(
   return undefined;
 }
 
-export function getPetEffectiveVaccinationExpiry(pet: MockPet): string | undefined {
+export function getPetEffectiveVaccinationExpiry(pet?: MockPet | null): string | undefined {
+  if (!pet) return undefined;
   if (pet.vaccinations && pet.vaccinations.length > 0) {
     const validDates = pet.vaccinations
       .map((v) => v.expiryDate)
@@ -1846,7 +1812,8 @@ export function getServiceCategories(): string[] {
   return Array.from(set);
 }
 
-export function isFlatRate(service: MockService): boolean {
+export function isFlatRate(service?: MockService | null): boolean {
+  if (!service) return false;
   if (typeof service.flatRate === "boolean") return service.flatRate;
   const cat = (service.category || "").toLowerCase();
   return cat.includes("train") || cat.includes("daycare");
