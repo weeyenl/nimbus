@@ -52,6 +52,12 @@ create table public.memberships (
   updated_at timestamptz not null default now()
 );
 
+create table public.membership_tiers (
+  id text primary key,
+  data jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
 create table public.grooming_records (
   id text primary key,
   data jsonb not null,
@@ -86,6 +92,7 @@ begin
     'appointments',
     'staff',
     'memberships',
+    'membership_tiers',
     'grooming_records',
     'payments',
     'services',

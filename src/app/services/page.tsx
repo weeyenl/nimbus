@@ -43,6 +43,10 @@ import {
 } from "@/components/ui/select";
 import {
   MEMBERSHIP_TIERS,
+  getMembershipTiers,
+  saveMembershipTier,
+  deleteMembershipTier,
+  MembershipTier,
   getServiceCategories,
   isFlatRate,
   calculateServicePrice,
@@ -61,6 +65,7 @@ import {
 export default function ServicesPage() {
   const [services, setServices] = useState<MockService[]>([]);
   const [addons, setAddons] = useState<MockAddon[]>([]);
+  const [membershipTiers, setMembershipTiers] = useState<MembershipTier[]>([]);
   const [activeTab, setActiveTab] = useState("services");
 
   // Dynamic pricing preview state
@@ -88,11 +93,25 @@ export default function ServicesPage() {
   const [addonPrice, setAddonPrice] = useState<number>(20);
   const [addonDesc, setAddonDesc] = useState("");
 
+  // Membership Tier Edit / Add Dialog State
+  const [isTierModalOpen, setIsTierModalOpen] = useState(false);
+  const [editingTierId, setEditingTierId] = useState<string | null>(null);
+  const [tierName, setTierName] = useState("VIP");
+  const [tierDisplayName, setTierDisplayName] = useState("VIP Membership");
+  const [tierPrice, setTierPrice] = useState<number>(1400);
+  const [tierBonusCredits, setTierBonusCredits] = useState<number>(100);
+  const [tierTotalCredits, setTierTotalCredits] = useState<number>(1500);
+  const [tierValidityMonths, setTierValidityMonths] = useState<number>(12);
+  const [tierHasQueuePriority, setTierHasQueuePriority] = useState<boolean>(true);
+  const [tierBenefitsText, setTierBenefitsText] = useState<string>("");
+
   const refreshData = () => {
     const s = getServices();
     const a = getAddons();
+    const t = getMembershipTiers();
     setServices(s);
     setAddons(a);
+    setMembershipTiers(t);
     setCategories(getServiceCategories());
     if (!calcServiceId && s.length > 0) {
       setCalcServiceId(s[0].id);
@@ -217,6 +236,68 @@ export default function ServicesPage() {
     }
   };
 
+  // --- MEMBERSHIP TIER ACTIONS ---
+  const handleOpenAddTier = () => {
+    setEditingTierId(null);
+    setTierName("NEW_TIER");
+    setTierDisplayName("Custom Membership Tier");
+    setTierPrice(500);
+    setTierBonusCredits(50);
+    setTierTotalCredits(550);
+    setTierValidityMonths(6);
+    setTierHasQueuePriority(false);
+    setTierBenefitsText("1× Free Spa Treatment\n6 Month Validity");
+    setIsTierModalOpen(true);
+  };
+
+  const handleOpenEditTier = (tier: MembershipTier) => {
+    setEditingTierId(tier.id);
+    setTierName(tier.name);
+    setTierDisplayName(tier.displayName);
+    setTierPrice(tier.price);
+    setTierBonusCredits(tier.bonusCredits);
+    setTierTotalCredits(tier.totalCredits);
+    setTierValidityMonths(tier.validityMonths);
+    setTierHasQueuePriority(tier.hasQueuePriority);
+    setTierBenefitsText((tier.includedBenefits || []).join("\n"));
+    setIsTierModalOpen(true);
+  };
+
+  const handleSaveTier = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tierDisplayName.trim()) return;
+
+    const benefits = tierBenefitsText
+      .split("\n")
+      .map((b) => b.trim())
+      .filter(Boolean);
+
+    const updatedTier: MembershipTier = {
+      id: editingTierId || `tier_${Date.now()}`,
+      name: tierName.trim() || tierDisplayName.trim().toUpperCase().replace(/\s+/g, "_"),
+      displayName: tierDisplayName.trim(),
+      price: Number(tierPrice) || 0,
+      bonusCredits: Number(tierBonusCredits) || 0,
+      totalCredits: Number(tierTotalCredits) || (Number(tierPrice) + Number(tierBonusCredits)),
+      validityMonths: Number(tierValidityMonths) || 12,
+      hasQueuePriority: Boolean(tierHasQueuePriority),
+      includedBenefits: benefits.length > 0 ? benefits : ["Club perks included"],
+      color: "border-primary shadow-sm",
+    };
+
+    saveMembershipTier(updatedTier);
+    setIsTierModalOpen(false);
+    refreshData();
+  };
+
+  const handleDeleteTier = (tierId: string) => {
+    if (confirm("Are you sure you want to remove this membership tier from the catalogue?")) {
+      deleteMembershipTier(tierId);
+      setIsTierModalOpen(false);
+      refreshData();
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -241,6 +322,12 @@ export default function ServicesPage() {
             <Button onClick={handleOpenAddAddon} className="gap-2">
               <Plus className="h-4 w-4" />
               Add Add-on
+            </Button>
+          )}
+          {activeTab === "memberships" && (
+            <Button onClick={handleOpenAddTier} className="gap-2">
+              <Plus className="h-4 w-4" />
+              Add Tier
             </Button>
           )}
         </div>
@@ -455,15 +542,21 @@ export default function ServicesPage() {
         {/* TAB 3: CLUB MEMBERSHIPS */}
         <TabsContent value="memberships" className="space-y-4 pt-4">
           <div className="border rounded-xl bg-card p-4 sm:p-6 shadow-sm">
-            <div className="text-center max-w-xl mx-auto mb-6">
-              <h2 className="text-2xl font-bold tracking-tight">Club Memberships</h2>
-              <p className="text-xs text-muted-foreground mt-1">
-                Prepaid credit packages with bonus credits and included spa/grooming perks.
-              </p>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between max-w-5xl mx-auto mb-6 gap-3">
+              <div>
+                <h2 className="text-2xl font-bold tracking-tight">Club Memberships</h2>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Configurable prepaid credit packages with bonus credits and included perks. Synchronized in database.
+                </p>
+              </div>
+              <Button size="sm" className="gap-1.5 text-xs font-semibold self-start sm:self-auto" onClick={handleOpenAddTier}>
+                <Plus className="h-4 w-4" />
+                Add New Tier
+              </Button>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              {MEMBERSHIP_TIERS.map((tier) => (
+              {(membershipTiers.length > 0 ? membershipTiers : MEMBERSHIP_TIERS).map((tier) => (
                 <div
                   key={tier.id}
                   className={`rounded-2xl border-2 p-5 flex flex-col justify-between transition-all ${
@@ -475,11 +568,22 @@ export default function ServicesPage() {
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <h3 className="font-bold text-lg">{tier.displayName.replace(" Membership", "")}</h3>
-                      {tier.hasQueuePriority && (
-                        <Badge variant="default" className="text-[10px] gap-1 py-0">
-                          <Crown className="h-3 w-3" /> Priority
-                        </Badge>
-                      )}
+                      <div className="flex items-center gap-1">
+                        {tier.hasQueuePriority && (
+                          <Badge variant="default" className="text-[10px] gap-1 py-0">
+                            <Crown className="h-3 w-3" /> Priority
+                          </Badge>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                          onClick={() => handleOpenEditTier(tier)}
+                          title="Configure Tier"
+                        >
+                          <Edit className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </div>
 
                     <div>
@@ -498,7 +602,7 @@ export default function ServicesPage() {
                       <span className="text-[11px] font-bold tracking-wider text-muted-foreground uppercase block">
                         Included Benefits
                       </span>
-                      {tier.includedBenefits.map((benefit, idx) => (
+                      {(tier.includedBenefits || []).map((benefit, idx) => (
                         <div key={idx} className="flex items-start gap-1.5 text-xs">
                           <CheckCircle className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
                           <span>{benefit}</span>
@@ -507,10 +611,19 @@ export default function ServicesPage() {
                     </div>
                   </div>
 
-                  <div className="pt-4 mt-4 border-t">
-                    <Badge variant="outline" className="w-full justify-center py-1 text-xs">
+                  <div className="pt-3 mt-3 border-t flex items-center justify-between gap-2">
+                    <Badge variant="outline" className="py-0.5 text-xs">
                       {tier.validityMonths} Month Validity
                     </Badge>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs gap-1 font-medium"
+                      onClick={() => handleOpenEditTier(tier)}
+                    >
+                      <Edit className="h-3 w-3" />
+                      Configure
+                    </Button>
                   </div>
                 </div>
               ))}
@@ -682,6 +795,152 @@ export default function ServicesPage() {
               <Button type="submit" className="gap-2">
                 <Check className="h-4 w-4" />
                 {editingAddonId ? "Save Changes" : "Create Add-on"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* MEMBERSHIP TIER EDIT/ADD DIALOG */}
+      <Dialog open={isTierModalOpen} onOpenChange={setIsTierModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {editingTierId ? `Configure ${tierDisplayName}` : "Add New Membership Tier"}
+            </DialogTitle>
+          </DialogHeader>
+
+          <form onSubmit={handleSaveTier} className="space-y-4 pt-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="tName" className="text-xs font-semibold">Tier Code / Name *</Label>
+                <Input
+                  id="tName"
+                  value={tierName}
+                  onChange={(e) => setTierName(e.target.value)}
+                  placeholder="e.g. VIP or GOLD"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="tDispName" className="text-xs font-semibold">Display Title *</Label>
+                <Input
+                  id="tDispName"
+                  value={tierDisplayName}
+                  onChange={(e) => setTierDisplayName(e.target.value)}
+                  placeholder="e.g. Gold Membership"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="tPrice" className="text-xs font-semibold">Price ($) *</Label>
+                <Input
+                  id="tPrice"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={tierPrice}
+                  onChange={(e) => {
+                    const p = parseFloat(e.target.value) || 0;
+                    setTierPrice(p);
+                    setTierTotalCredits(p + (Number(tierBonusCredits) || 0));
+                  }}
+                  required
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="tBonus" className="text-xs font-semibold">Bonus ($)</Label>
+                <Input
+                  id="tBonus"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={tierBonusCredits}
+                  onChange={(e) => {
+                    const b = parseFloat(e.target.value) || 0;
+                    setTierBonusCredits(b);
+                    setTierTotalCredits((Number(tierPrice) || 0) + b);
+                  }}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="tTotal" className="text-xs font-semibold">Total Credits</Label>
+                <Input
+                  id="tTotal"
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={tierTotalCredits}
+                  onChange={(e) => setTierTotalCredits(parseFloat(e.target.value) || 0)}
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="tValidity" className="text-xs font-semibold">Validity (Months)</Label>
+                <Input
+                  id="tValidity"
+                  type="number"
+                  min="1"
+                  max="48"
+                  value={tierValidityMonths}
+                  onChange={(e) => setTierValidityMonths(parseInt(e.target.value) || 12)}
+                  required
+                />
+              </div>
+
+              <div className="space-y-1.5 flex flex-col justify-end">
+                <label className="flex items-center gap-2 cursor-pointer pb-2 font-medium text-xs select-none">
+                  <input
+                    type="checkbox"
+                    checked={tierHasQueuePriority}
+                    onChange={(e) => setTierHasQueuePriority(e.target.checked)}
+                    className="rounded border-input h-4 w-4 text-primary"
+                  />
+                  <span>VIP Queue Priority</span>
+                </label>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="tBenefits" className="text-xs font-semibold">Included Perks & Benefits</Label>
+                <span className="text-[10px] text-muted-foreground">1 perk per line</span>
+              </div>
+              <Textarea
+                id="tBenefits"
+                rows={3}
+                value={tierBenefitsText}
+                onChange={(e) => setTierBenefitsText(e.target.value)}
+                placeholder="4× Spa Therapy Add-on&#10;2× Nose & Paw Defense&#10;+ Queue Priority"
+              />
+            </div>
+
+            <DialogFooter className="pt-2 gap-2 sm:gap-0">
+              {editingTierId && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="text-destructive hover:bg-destructive/10 mr-auto text-xs"
+                  onClick={() => handleDeleteTier(editingTierId)}
+                >
+                  <Trash2 className="h-3.5 w-3.5 mr-1" />
+                  Delete Tier
+                </Button>
+              )}
+              <Button type="button" variant="outline" onClick={() => setIsTierModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit">
+                Save Tier Changes
               </Button>
             </DialogFooter>
           </form>

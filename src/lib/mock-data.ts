@@ -85,21 +85,21 @@ export interface MockAddon {
 
 export interface MembershipTier {
   id: string;
-  name: "BASIC" | "STANDARD" | "VIP" | "SVIP";
+  name: "BASIC" | "STANDARD" | "VIP" | "SVIP" | string;
   displayName: string;
   price: number;
   bonusCredits: number;
   totalCredits: number;
   validityMonths: number;
   hasQueuePriority: boolean;
-  color: string;
+  color?: string;
   includedBenefits: string[];
 }
 
 export interface CustomerMembership {
   id: string;
   customerId: string;
-  tierName: "BASIC" | "STANDARD" | "VIP" | "SVIP";
+  tierName: "BASIC" | "STANDARD" | "VIP" | "SVIP" | string;
   displayName: string;
   purchaseDate: string;
   expiryDate: string;
@@ -719,6 +719,7 @@ const STORAGE_KEYS = {
   STAFF: "nimbus_staff",
   CUSTOMERS: "nimbus_customers",
   MEMBERSHIPS: "nimbus_memberships",
+  MEMBERSHIP_TIERS: "nimbus_membership_tiers",
   GROOMING_RECORDS: "nimbus_grooming_records",
   PAYMENTS: "nimbus_payments",
   SERVICES: "nimbus_services",
@@ -833,6 +834,7 @@ export async function hydrateFromCloud(): Promise<void> {
       [STORAGE_KEYS.SERVICES, MOCK_SERVICES],
       [STORAGE_KEYS.ADDONS, MOCK_ADDONS],
       [STORAGE_KEYS.STAFF, MOCK_STAFF_DATA],
+      [STORAGE_KEYS.MEMBERSHIP_TIERS, MEMBERSHIP_TIERS],
     ] as const) {
       const { error } = await supabase
         .from(tableOf(key))
@@ -888,7 +890,30 @@ export function saveCustomer(customer: MockCustomer): void {
   commit(STORAGE_KEYS.CUSTOMERS, updated);
 }
 
-// 4. MEMBERSHIPS
+// 4. MEMBERSHIPS & TIERS
+export function getMembershipTiers(): MembershipTier[] {
+  if (typeof window === "undefined") return isSupabaseConfigured ? [] : MEMBERSHIP_TIERS;
+  return readCollection(STORAGE_KEYS.MEMBERSHIP_TIERS, isSupabaseConfigured ? [] : MEMBERSHIP_TIERS);
+}
+
+export function saveMembershipTier(tier: MembershipTier): void {
+  const tiers = getMembershipTiers();
+  const idx = tiers.findIndex((t) => t.id === tier.id);
+  let updated: MembershipTier[];
+  if (idx !== -1) {
+    updated = tiers.map((t) => (t.id === tier.id ? tier : t));
+  } else {
+    updated = [...tiers, tier];
+  }
+  commit(STORAGE_KEYS.MEMBERSHIP_TIERS, updated);
+}
+
+export function deleteMembershipTier(tierId: string): void {
+  const tiers = getMembershipTiers();
+  const updated = tiers.filter((t) => t.id !== tierId);
+  commit(STORAGE_KEYS.MEMBERSHIP_TIERS, updated);
+}
+
 export function getMemberships(): CustomerMembership[] {
   if (typeof window === "undefined") return isSupabaseConfigured ? [] : INITIAL_MEMBERSHIPS;
   return readCollection(STORAGE_KEYS.MEMBERSHIPS, isSupabaseConfigured ? [] : INITIAL_MEMBERSHIPS);
@@ -899,11 +924,32 @@ export function getCustomerMembership(customerId: string): CustomerMembership | 
   return memberships.find((m) => m.customerId === customerId);
 }
 
-export function purchaseMembership(customerId: string, tierName: "BASIC" | "STANDARD" | "VIP" | "SVIP"): CustomerMembership {
-  const tier = MEMBERSHIP_TIERS.find((t) => t.name === tierName)!;
+export function deleteCustomerMembership(customerId: string): void {
+  const current = getMemberships().filter((m) => m.customerId !== customerId);
+  commit(STORAGE_KEYS.MEMBERSHIPS, current);
+}
+
+export function purchaseMembership(
+  customerId: string,
+  tierName: "BASIC" | "STANDARD" | "VIP" | "SVIP" | string,
+  rolloverRemaining: boolean = true
+): CustomerMembership {
+  const tiers = getMembershipTiers();
+  const tier = tiers.find((t) => t.name === tierName || t.id === tierName) || tiers[0];
+  const existing = getCustomerMembership(customerId);
+
   const now = new Date();
-  const expiry = new Date();
-  expiry.setMonth(expiry.getMonth() + tier.validityMonths);
+  let baseDate = now;
+  // If customer has an active membership that expires in the future, extend from current expiry date!
+  if (existing?.expiryDate) {
+    const existingExp = new Date(existing.expiryDate + "T23:59:59");
+    if (existingExp > now) {
+      baseDate = existingExp;
+    }
+  }
+
+  const expiry = new Date(baseDate);
+  expiry.setMonth(expiry.getMonth() + (tier.validityMonths || 12));
 
   const bonusAllowances = tier.name === "VIP" || tier.name === "SVIP" ? [
     { id: `ba_${Date.now()}_1`, name: "Spa Therapy or Medicated Treatment", total: tier.name === "SVIP" ? 8 : 4, remaining: tier.name === "SVIP" ? 8 : 4 },
@@ -912,17 +958,30 @@ export function purchaseMembership(customerId: string, tierName: "BASIC" | "STAN
     { id: `ba_${Date.now()}_1`, name: "Spa Therapy or Medicated Treatment", total: tier.name === "STANDARD" ? 2 : 1, remaining: tier.name === "STANDARD" ? 2 : 1 },
   ];
 
+  // Rollover remaining credits & allowances if requested
+  const prevRemaining = (rolloverRemaining && existing) ? Math.max(0, existing.remainingCredits) : 0;
+  const newRemaining = prevRemaining + tier.totalCredits;
+  const newTotal = (rolloverRemaining && existing) ? (existing.totalCredits + tier.totalCredits) : tier.totalCredits;
+
+  let combinedAllowances = bonusAllowances;
+  if (rolloverRemaining && existing?.bonusAllowances?.length) {
+    combinedAllowances = [
+      ...bonusAllowances,
+      ...existing.bonusAllowances.filter((ba) => ba.remaining > 0),
+    ];
+  }
+
   const newMembership: CustomerMembership = {
-    id: `mem_${Date.now()}`,
+    id: existing?.id || `mem_${Date.now()}`,
     customerId,
-    tierName,
+    tierName: tier.name,
     displayName: tier.displayName,
     purchaseDate: localDateStr(now),
     expiryDate: localDateStr(expiry),
-    remainingCredits: tier.totalCredits,
-    totalCredits: tier.totalCredits,
+    remainingCredits: newRemaining,
+    totalCredits: newTotal,
     hasQueuePriority: tier.hasQueuePriority,
-    bonusAllowances,
+    bonusAllowances: combinedAllowances,
   };
 
   const current = getMemberships().filter((m) => m.customerId !== customerId);

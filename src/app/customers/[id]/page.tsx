@@ -22,6 +22,7 @@ import {
   DollarSign,
   Check,
   Edit,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -45,11 +46,14 @@ import {
   getCustomerMembership,
   purchaseMembership,
   updateCustomerMembership,
+  deleteCustomerMembership,
   setCustomerMembership,
   localDateStr,
   adjustCustomerMembershipCredits,
   deductPackageAddonAllowance,
+  getMembershipTiers,
   MEMBERSHIP_TIERS,
+  MembershipTier,
   MockCustomer,
   MockAppointment,
   CustomerMembership,
@@ -60,10 +64,15 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
   const [customer, setCustomer] = useState<MockCustomer | null>(null);
   const [appointments, setAppointments] = useState<MockAppointment[]>([]);
   const [membership, setMembership] = useState<CustomerMembership | undefined>();
+  const [membershipTiers, setMembershipTiers] = useState<MembershipTier[]>([]);
 
   // Modals
   const [isBuyMembershipOpen, setIsBuyMembershipOpen] = useState(false);
   const [isAdjustBalanceOpen, setIsAdjustBalanceOpen] = useState(false);
+  const [isExtendExpiryOpen, setIsExtendExpiryOpen] = useState(false);
+  const [extendExpiryDate, setExtendExpiryDate] = useState<string>("");
+  const [isRemoveMembershipOpen, setIsRemoveMembershipOpen] = useState(false);
+  const [rolloverCredits, setRolloverCredits] = useState<boolean>(true);
 
   // Custom membership creation form
   const [customTierName, setCustomTierName] = useState("Custom Credit Package");
@@ -100,6 +109,10 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
 
     const mem = getCustomerMembership(found.id);
     setMembership(mem);
+    if (mem?.expiryDate) {
+      setExtendExpiryDate(mem.expiryDate);
+    }
+    setMembershipTiers(getMembershipTiers());
   };
 
   useEffect(() => {
@@ -119,10 +132,37 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
   }
   if (!customer) return null;
 
-  function handleBuyTier(tierName: "BASIC" | "STANDARD" | "VIP" | "SVIP") {
-    const newMem = purchaseMembership(customer!.id, tierName);
+  function handleBuyTier(tierName: string) {
+    if (!customer) return;
+    const newMem = purchaseMembership(customer.id, tierName, rolloverCredits);
     setMembership(newMem);
     setIsBuyMembershipOpen(false);
+  }
+
+  function handleExtendExpiry(e: React.FormEvent) {
+    e.preventDefault();
+    if (!customer || !extendExpiryDate) return;
+    const updated = updateCustomerMembership(customer.id, {
+      expiryDate: extendExpiryDate,
+    });
+    if (updated) {
+      setMembership(updated);
+    }
+    setIsExtendExpiryOpen(false);
+  }
+
+  function handleQuickExtendMonths(months: number) {
+    if (!membership) return;
+    const currentBase = membership.expiryDate ? new Date(membership.expiryDate + "T00:00:00") : new Date();
+    currentBase.setMonth(currentBase.getMonth() + months);
+    setExtendExpiryDate(localDateStr(currentBase));
+  }
+
+  function handleRemoveMembership() {
+    if (!customer) return;
+    deleteCustomerMembership(customer.id);
+    setMembership(undefined);
+    setIsRemoveMembershipOpen(false);
   }
 
   function handleCreateCustomPackage(e: React.FormEvent) {
@@ -243,27 +283,55 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {membership && (
             <Button
               variant="outline"
               size="sm"
-              className="gap-2 border-primary/40 text-primary hover:bg-primary/5"
+              className="gap-1.5 text-xs"
+              onClick={() => {
+                setExtendExpiryDate(membership.expiryDate || localDateStr());
+                setIsExtendExpiryOpen(true);
+              }}
+            >
+              <Calendar className="h-3.5 w-3.5 text-primary" />
+              Extend Expiry
+            </Button>
+          )}
+          {membership && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5 text-xs border-primary/40 text-primary hover:bg-primary/5"
               onClick={openAdjustModal}
             >
-              <SlidersHorizontal className="h-4 w-4" />
+              <SlidersHorizontal className="h-3.5 w-3.5" />
               Adjust Balance ($)
             </Button>
           )}
           <Button
             variant="outline"
             size="sm"
-            className="gap-2"
-            onClick={() => setIsBuyMembershipOpen(true)}
+            className="gap-1.5 text-xs"
+            onClick={() => {
+              setRolloverCredits(true);
+              setIsBuyMembershipOpen(true);
+            }}
           >
-            <Crown className="h-4 w-4 text-amber-500" />
-            {membership ? "Change / Upgrade Tier" : "Assign Club Package"}
+            <Crown className="h-3.5 w-3.5 text-amber-500" />
+            {membership ? "Renew / Buy Package" : "Assign Club Package"}
           </Button>
+          {membership && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onClick={() => setIsRemoveMembershipOpen(true)}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Remove Membership
+            </Button>
+          )}
         </div>
       </div>
 
@@ -338,24 +406,49 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
                   </div>
                 </div>
 
-                {/* Quick Adjust Button directly on Card */}
-                <div className="flex items-center justify-between pt-1">
+                {/* Action buttons directly on Card */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t">
                   <Button
                     size="sm"
                     variant="default"
-                    className="h-7 text-xs gap-1.5 font-semibold"
+                    className="h-7 text-xs gap-1 font-semibold"
                     onClick={openAdjustModal}
                   >
                     <SlidersHorizontal className="h-3 w-3" />
-                    Adjust Package Balance
+                    Adjust Balance
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs gap-1"
+                    onClick={() => {
+                      setExtendExpiryDate(membership.expiryDate || localDateStr());
+                      setIsExtendExpiryOpen(true);
+                    }}
+                  >
+                    <Calendar className="h-3 w-3 text-primary" />
+                    Extend Expiry
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs gap-1"
+                    onClick={() => {
+                      setRolloverCredits(true);
+                      setIsBuyMembershipOpen(true);
+                    }}
+                  >
+                    <Crown className="h-3 w-3 text-amber-500" />
+                    Renew / Buy Package
                   </Button>
                   <Button
                     size="sm"
                     variant="ghost"
-                    className="h-7 text-xs text-muted-foreground hover:text-foreground"
-                    onClick={() => setIsBuyMembershipOpen(true)}
+                    className="h-7 text-xs gap-1 text-destructive hover:bg-destructive/10 hover:text-destructive sm:ml-auto"
+                    onClick={() => setIsRemoveMembershipOpen(true)}
                   >
-                    Upgrade Tier
+                    <Trash2 className="h-3 w-3" />
+                    Remove
                   </Button>
                 </div>
 
@@ -826,13 +919,43 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
             </DialogDescription>
           </DialogHeader>
 
-          {/* 4 Standard Club Tiers */}
+          {/* Active Membership Notice & Rollover Options */}
+          {membership && (
+            <div className="rounded-lg border bg-amber-500/10 border-amber-500/30 p-3 text-xs space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-foreground flex items-center gap-1.5">
+                  <Crown className="h-4 w-4 text-amber-500" />
+                  Currently Active: {membership.displayName}
+                </span>
+                <Badge variant="outline" className="text-[10px]">
+                  Exp: {membership.expiryDate}
+                </Badge>
+              </div>
+              <p className="text-muted-foreground text-[11px]">
+                Current Available Balance: <strong className="text-foreground">${membership.remainingCredits}</strong>
+              </p>
+              <label className="flex items-center gap-2 pt-1 cursor-pointer font-medium text-foreground select-none">
+                <input
+                  type="checkbox"
+                  checked={rolloverCredits}
+                  onChange={(e) => setRolloverCredits(e.target.checked)}
+                  className="rounded border-input h-4 w-4 text-primary"
+                />
+                <span>Rollover & add ${membership.remainingCredits} remaining credits to new package</span>
+              </label>
+              <p className="text-[10px] text-muted-foreground pl-6">
+                * When buying a new package, expiry date extends from current expiry date ({membership.expiryDate}).
+              </p>
+            </div>
+          )}
+
+          {/* Salon Packages (Configurable from DB) */}
           <div className="space-y-2 pt-1">
             <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
               Standard Salon Packages
             </span>
             <div className="grid gap-3 sm:grid-cols-2">
-              {MEMBERSHIP_TIERS.map((tier) => (
+              {(membershipTiers.length > 0 ? membershipTiers : MEMBERSHIP_TIERS).map((tier) => (
                 <div
                   key={tier.id}
                   className="border-2 rounded-xl p-4 flex flex-col justify-between hover:border-primary cursor-pointer transition-all bg-card"
@@ -847,11 +970,11 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
                       +${tier.bonusCredits} Bonus = ${tier.totalCredits} Credits
                     </p>
                     <p className="text-[11px] text-muted-foreground mt-2">
-                      {tier.validityMonths} Months · {tier.includedBenefits[0]}
+                      {tier.validityMonths} Months · {tier.includedBenefits?.[0] || "Club Perks Included"}
                     </p>
                   </div>
                   <Button size="sm" className="w-full mt-3 text-xs">
-                    Select {tier.displayName.replace(" Membership", "")}
+                    {membership ? `Renew with ${tier.displayName.replace(" Membership", "")}` : `Select ${tier.displayName.replace(" Membership", "")}`}
                   </Button>
                 </div>
               ))}
@@ -914,6 +1037,122 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
           <DialogFooter className="pt-2">
             <Button variant="outline" onClick={() => setIsBuyMembershipOpen(false)}>
               Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* EXTEND EXPIRY DATE DIALOG */}
+      <Dialog open={isExtendExpiryOpen} onOpenChange={setIsExtendExpiryOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Calendar className="h-5 w-5 text-primary" />
+              Extend Membership Expiry: {customer.name}
+            </DialogTitle>
+            <DialogDescription>
+              Current expiry date: <span className="font-semibold text-foreground">{membership?.expiryDate || "Not set"}</span>
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleExtendExpiry} className="space-y-4 pt-2">
+            <div className="space-y-2">
+              <Label htmlFor="extDate" className="text-xs font-semibold">
+                New Expiry Date
+              </Label>
+              <Input
+                id="extDate"
+                type="date"
+                value={extendExpiryDate}
+                onChange={(e) => setExtendExpiryDate(e.target.value)}
+                required
+                className="cursor-pointer"
+              />
+            </div>
+
+            {/* Quick Extension Pills */}
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground font-medium">Quick Extension from current expiry:</Label>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="h-8 text-xs font-semibold"
+                  onClick={() => handleQuickExtendMonths(1)}
+                >
+                  +1 Month
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="h-8 text-xs font-semibold"
+                  onClick={() => handleQuickExtendMonths(3)}
+                >
+                  +3 Months
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="h-8 text-xs font-semibold"
+                  onClick={() => handleQuickExtendMonths(6)}
+                >
+                  +6 Months
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="h-8 text-xs font-semibold"
+                  onClick={() => handleQuickExtendMonths(12)}
+                >
+                  +1 Year
+                </Button>
+              </div>
+            </div>
+
+            <DialogFooter className="pt-3 border-t gap-2 sm:gap-0">
+              <Button type="button" variant="outline" onClick={() => setIsExtendExpiryOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit">
+                Save New Expiry Date
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* REMOVE MEMBERSHIP CONFIRMATION DIALOG */}
+      <Dialog open={isRemoveMembershipOpen} onOpenChange={setIsRemoveMembershipOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5 text-destructive" />
+              Remove Membership?
+            </DialogTitle>
+            <DialogDescription>
+              Are you sure you want to remove the <strong>{membership?.displayName}</strong> for <strong>{customer.name}</strong>?
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-3 text-xs text-destructive space-y-1 my-2">
+            <p className="font-semibold">⚠️ This action will immediately:</p>
+            <ul className="list-disc pl-4 space-y-0.5">
+              <li>Clear remaining <strong>${membership?.remainingCredits}</strong> package credits</li>
+              <li>Cancel remaining bonus spa/medicated treatment vouchers</li>
+              <li>Remove membership tier badge from this customer</li>
+            </ul>
+          </div>
+
+          <DialogFooter className="pt-2 gap-2 sm:gap-0">
+            <Button type="button" variant="outline" onClick={() => setIsRemoveMembershipOpen(false)}>
+              Keep Membership
+            </Button>
+            <Button type="button" variant="destructive" onClick={handleRemoveMembership}>
+              Yes, Remove Membership
             </Button>
           </DialogFooter>
         </DialogContent>
