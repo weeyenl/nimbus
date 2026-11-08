@@ -31,6 +31,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -42,7 +43,9 @@ import {
 import { getInitials } from "@/lib/utils";
 import {
   getCustomers,
+  saveCustomer,
   getAppointments,
+  saveAppointment,
   getCustomerMembership,
   purchaseMembership,
   updateCustomerMembership,
@@ -73,6 +76,15 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
   const [extendExpiryDate, setExtendExpiryDate] = useState<string>("");
   const [isRemoveMembershipOpen, setIsRemoveMembershipOpen] = useState(false);
   const [rolloverCredits, setRolloverCredits] = useState<boolean>(true);
+
+  // Edit Customer Details Modal State
+  const [isEditCustomerOpen, setIsEditCustomerOpen] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editPhone, setEditPhone] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+  const [editAddress, setEditAddress] = useState("");
+  const [editReferralSource, setEditReferralSource] = useState("");
+  const [editNotes, setEditNotes] = useState("");
 
   // Custom membership creation form
   const [customTierName, setCustomTierName] = useState("Custom Credit Package");
@@ -131,6 +143,56 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
     );
   }
   if (!customer) return null;
+
+  function openEditCustomerModal() {
+    if (!customer) return;
+    setEditName(customer.name || "");
+    setEditPhone(customer.phone || "");
+    setEditEmail(customer.email || "");
+    setEditAddress(customer.address || "");
+    setEditReferralSource(customer.referralSource || "");
+    setEditNotes(customer.notes || "");
+    setIsEditCustomerOpen(true);
+  }
+
+  function handleSaveCustomerDetails(e: React.FormEvent) {
+    e.preventDefault();
+    if (!customer) return;
+    if (!editName.trim() || !editPhone.trim()) {
+      alert("Name and phone number are required.");
+      return;
+    }
+
+    const updatedCustomer: MockCustomer = {
+      ...customer,
+      name: editName.trim(),
+      phone: editPhone.trim(),
+      email: editEmail.trim() || undefined,
+      address: editAddress.trim() || undefined,
+      referralSource: editReferralSource.trim() || undefined,
+      notes: editNotes.trim() || undefined,
+    };
+
+    saveCustomer(updatedCustomer);
+    setCustomer(updatedCustomer);
+
+    // Sync any appointments for this customer if name or phone changed
+    if (editName.trim() !== customer.name || editPhone.trim() !== customer.phone) {
+      const allApts = getAppointments();
+      for (const apt of allApts) {
+        if (apt.customerId === customer.id) {
+          saveAppointment({
+            ...apt,
+            customerName: editName.trim(),
+            customerPhone: editPhone.trim(),
+          });
+        }
+      }
+      setAppointments(getAppointments().filter((a) => a.customerId === customer.id));
+    }
+
+    setIsEditCustomerOpen(false);
+  }
 
   function handleBuyTier(tierName: string) {
     if (!customer) return;
@@ -284,6 +346,15 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 text-xs"
+            onClick={openEditCustomerModal}
+          >
+            <Edit className="h-3.5 w-3.5 text-primary" />
+            Edit Profile
+          </Button>
           {membership && (
             <Button
               variant="outline"
@@ -339,28 +410,59 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
       <div className="grid gap-4 sm:grid-cols-2">
         {/* Contact Info */}
         <Card className="shadow-sm">
-          <CardContent className="flex flex-col justify-center space-y-2 p-4">
+          <CardHeader className="p-4 pb-2 flex flex-row items-center justify-between space-y-0">
+            <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+              Contact Information
+            </CardTitle>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs gap-1 text-primary hover:bg-primary/10 -mr-2"
+              onClick={openEditCustomerModal}
+            >
+              <Edit className="h-3 w-3" />
+              Edit Details
+            </Button>
+          </CardHeader>
+          <CardContent className="flex flex-col justify-center space-y-2 p-4 pt-1">
             <div className="flex items-center gap-2 text-sm">
-              <Phone className="h-4 w-4 text-muted-foreground" />
-              <span className="font-semibold">{customer.phone}</span>
+              <Phone className="h-4 w-4 text-muted-foreground shrink-0" />
+              <span className="font-semibold text-foreground">{customer.phone}</span>
             </div>
-            {customer.email && (
+            {customer.email ? (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Mail className="h-4 w-4" />
-                <span>{customer.email}</span>
+                <Mail className="h-4 w-4 text-muted-foreground shrink-0" />
+                <span className="truncate">{customer.email}</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground/60 italic">
+                <Mail className="h-4 w-4 shrink-0" />
+                <span>No email provided</span>
               </div>
             )}
-            {customer.address && (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <MapPin className="h-4 w-4" />
+            {customer.address ? (
+              <div className="flex items-start gap-2 text-sm text-muted-foreground">
+                <MapPin className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
                 <span>{customer.address}</span>
               </div>
+            ) : (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground/60 italic">
+                <MapPin className="h-4 w-4 shrink-0" />
+                <span>No address recorded</span>
+              </div>
             )}
-            {customer.referralSource && (
-              <div className="pt-1">
-                <span className="text-[11px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
-                  Source: {customer.referralSource}
-                </span>
+            {(customer.referralSource || customer.notes) && (
+              <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t">
+                {customer.referralSource && (
+                  <span className="text-[11px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full font-medium">
+                    Source: {customer.referralSource}
+                  </span>
+                )}
+                {customer.notes && (
+                  <span className="text-[11px] text-amber-700 bg-amber-50 dark:bg-amber-950 dark:text-amber-300 px-2 py-0.5 rounded-full font-medium truncate max-w-full">
+                    Note: {customer.notes}
+                  </span>
+                )}
               </div>
             )}
           </CardContent>
@@ -1155,6 +1257,109 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
               Yes, Remove Membership
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* EDIT CUSTOMER PROFILE DIALOG */}
+      <Dialog open={isEditCustomerOpen} onOpenChange={setIsEditCustomerOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Edit className="h-5 w-5 text-primary" />
+              Edit Customer Details
+            </DialogTitle>
+            <DialogDescription>
+              Update contact information and preferences for {customer.name}.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleSaveCustomerDetails} className="space-y-4 pt-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="custName" className="text-xs font-semibold">
+                Customer Name *
+              </Label>
+              <Input
+                id="custName"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                placeholder="e.g. Sarah Tan"
+                required
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="custPhone" className="text-xs font-semibold">
+                Phone Number *
+              </Label>
+              <Input
+                id="custPhone"
+                type="tel"
+                value={editPhone}
+                onChange={(e) => setEditPhone(e.target.value)}
+                placeholder="e.g. +65 9123 4567"
+                required
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="custEmail" className="text-xs font-semibold">
+                Email Address
+              </Label>
+              <Input
+                id="custEmail"
+                type="email"
+                value={editEmail}
+                onChange={(e) => setEditEmail(e.target.value)}
+                placeholder="e.g. sarah.tan@example.com"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="custAddr" className="text-xs font-semibold">
+                Residential Address
+              </Label>
+              <Input
+                id="custAddr"
+                value={editAddress}
+                onChange={(e) => setEditAddress(e.target.value)}
+                placeholder="e.g. 12 River Valley Road, #08-04"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="custRef" className="text-xs font-semibold">
+                Referral Source
+              </Label>
+              <Input
+                id="custRef"
+                value={editReferralSource}
+                onChange={(e) => setEditReferralSource(e.target.value)}
+                placeholder="e.g. Instagram, Word of mouth, Walk-in, Google"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="custNotes" className="text-xs font-semibold">
+                General Notes / Preferences
+              </Label>
+              <Textarea
+                id="custNotes"
+                rows={2}
+                value={editNotes}
+                onChange={(e) => setEditNotes(e.target.value)}
+                placeholder="e.g. Prefers WhatsApp notifications, morning appointments"
+              />
+            </div>
+
+            <DialogFooter className="pt-2 gap-2 sm:gap-0">
+              <Button type="button" variant="outline" onClick={() => setIsEditCustomerOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit">
+                Save Changes
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </div>
