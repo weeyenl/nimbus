@@ -1,10 +1,22 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Plus, Calendar, Phone, Mail, Edit, Trash2, Check, Clock, UserCheck } from "lucide-react";
+import {
+  Plus,
+  Calendar,
+  Phone,
+  Mail,
+  Edit,
+  Trash2,
+  Check,
+  Clock,
+  KeyRound,
+  ShieldAlert,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   Card,
   CardContent,
@@ -22,14 +34,34 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { getInitials } from "@/lib/utils";
-import { getStaff, saveStaff, updateStaff, deleteStaff, MockStaff } from "@/lib/mock-data";
+import { showToast } from "@/components/ui/toast-system";
+import { getInitials, hashStaffPin } from "@/lib/utils";
+import {
+  newId,
+  getStaff,
+  saveStaff,
+  updateStaff,
+  deleteStaff,
+  verifyStaffPin,
+  staffHasPin,
+  MockStaff,
+} from "@/lib/mock-data";
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -40,28 +72,41 @@ const ROLE_COLORS: Record<string, string> = {
 };
 
 const SCHEDULE_PRESETS = ["09:00-18:00", "10:00-19:00", "09:00-14:00", "13:00-20:00", "OFF"];
+const CUSTOM_SHIFT = "__CUSTOM__";
+
+const DEFAULT_SCHEDULE: Record<string, string> = {
+  Mon: "09:00-18:00",
+  Tue: "09:00-18:00",
+  Wed: "09:00-18:00",
+  Thu: "09:00-18:00",
+  Fri: "09:00-18:00",
+  Sat: "09:00-14:00",
+  Sun: "OFF",
+};
+
+function parseShiftTimes(val: string): [string, string] {
+  const parts = (val || "").split("-");
+  if (parts.length === 2 && /^\d{2}:\d{2}$/.test(parts[0]) && /^\d{2}:\d{2}$/.test(parts[1])) {
+    return [parts[0], parts[1]];
+  }
+  return ["09:00", "18:00"];
+}
 
 export default function StaffPage() {
   const [staffList, setStaffList] = useState<MockStaff[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<MockStaff | null>(null);
 
   // Edit or Add state
-  const [editingStaffId, setEditingStaffId] = useState<string | null>(null);
+  const [editingStaff, setEditingStaff] = useState<MockStaff | null>(null);
   const [name, setName] = useState("");
   const [role, setRole] = useState<"GROOMER" | "RECEPTIONIST" | "OWNER">("GROOMER");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
-  const [pin, setPin] = useState("");
+  const [pinInput, setPinInput] = useState("");
+  const [clearPin, setClearPin] = useState(false);
   const [isActive, setIsActive] = useState(true);
-  const [schedule, setSchedule] = useState<Record<string, string>>({
-    Mon: "09:00-18:00",
-    Tue: "09:00-18:00",
-    Wed: "09:00-18:00",
-    Thu: "09:00-18:00",
-    Fri: "09:00-18:00",
-    Sat: "09:00-14:00",
-    Sun: "OFF",
-  });
+  const [schedule, setSchedule] = useState<Record<string, string>>(DEFAULT_SCHEDULE);
 
   const refreshList = () => {
     setStaffList(getStaff());
@@ -69,96 +114,172 @@ export default function StaffPage() {
 
   useEffect(() => {
     refreshList();
+    const onRefresh = () => refreshList();
+    window.addEventListener("nimbus-data-updated", onRefresh);
+    return () => window.removeEventListener("nimbus-data-updated", onRefresh);
   }, []);
 
   const handleOpenAdd = () => {
-    setEditingStaffId(null);
+    setEditingStaff(null);
     setName("");
     setRole("GROOMER");
     setPhone("+65 9123 4567");
     setEmail("");
-    setPin("");
+    setPinInput("");
+    setClearPin(false);
     setIsActive(true);
-    setSchedule({
-      Mon: "09:00-18:00",
-      Tue: "09:00-18:00",
-      Wed: "09:00-18:00",
-      Thu: "09:00-18:00",
-      Fri: "09:00-18:00",
-      Sat: "09:00-14:00",
-      Sun: "OFF",
-    });
+    setSchedule({ ...DEFAULT_SCHEDULE });
     setIsDialogOpen(true);
   };
 
   const handleOpenEdit = (staff: MockStaff) => {
-    setEditingStaffId(staff.id);
+    setEditingStaff(staff);
     setName(staff.name);
     setRole(staff.role);
     setPhone(staff.phone);
     setEmail(staff.email);
-    setPin(staff.pin || "");
-    setIsActive(staff.isActive);
-    setSchedule(
-      staff.schedule || {
-        Mon: "09:00-18:00",
-        Tue: "09:00-18:00",
-        Wed: "09:00-18:00",
-        Thu: "09:00-18:00",
-        Fri: "09:00-18:00",
-        Sat: "09:00-14:00",
-        Sun: "OFF",
-      }
-    );
+    setPinInput("");
+    setClearPin(false);
+    setIsActive(staff.isActive !== false);
+    setSchedule(staff.schedule ? { ...DEFAULT_SCHEDULE, ...staff.schedule } : { ...DEFAULT_SCHEDULE });
     setIsDialogOpen(true);
   };
 
-  const handleDayScheduleChange = (day: string, value: string) => {
+  const handleDayPresetChange = (day: string, value: string) => {
+    if (value === CUSTOM_SHIFT) {
+      const existing = schedule[day];
+      const [start, end] = parseShiftTimes(existing);
+      setSchedule((prev) => ({
+        ...prev,
+        [day]: `${start}-${end}`,
+      }));
+      return;
+    }
     setSchedule((prev) => ({
       ...prev,
       [day]: value,
     }));
   };
 
+  const handleCustomTimeChange = (day: string, bound: "start" | "end", nextTime: string) => {
+    const [curStart, curEnd] = parseShiftTimes(schedule[day]);
+    const next = bound === "start" ? `${nextTime}-${curEnd}` : `${curStart}-${nextTime}`;
+    setSchedule((prev) => ({
+      ...prev,
+      [day]: next,
+    }));
+  };
+
+  const activeOwnerCountExcluding = (excludeId?: string) =>
+    staffList.filter(
+      (s) => s.id !== excludeId && s.role === "OWNER" && s.isActive !== false
+    ).length;
+
   const handleSaveStaff = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
+    if (!name.trim()) {
+      showToast("Staff full name is required.", "warning");
+      return;
+    }
 
-    if (editingStaffId) {
-      const staffMember: MockStaff = {
-        id: editingStaffId,
-        name: name.trim(),
-        role,
-        phone: phone.trim() || "+65 9000 0000",
-        email: email.trim() || `${name.toLowerCase().replace(/\s+/g, ".")}@doglab.com`,
-        pin: pin.trim() || undefined,
-        isActive,
-        schedule,
-      };
-      updateStaff(staffMember);
+    // Protect last active OWNER from lock-out
+    if (
+      editingStaff &&
+      editingStaff.role === "OWNER" &&
+      (role !== "OWNER" || !isActive) &&
+      activeOwnerCountExcluding(editingStaff.id) === 0
+    ) {
+      showToast("At least one active Owner profile must remain enabled.", "error");
+      return;
+    }
+
+    // Validate shift ranges
+    for (const day of DAYS) {
+      const shift = schedule[day] || "OFF";
+      if (shift !== "OFF") {
+        const [start, end] = parseShiftTimes(shift);
+        if (end <= start) {
+          showToast(`${day}: End time (${end}) must be later than start time (${start}).`, "warning");
+          return;
+        }
+      }
+    }
+
+    const cleanPin = pinInput.trim();
+    if (cleanPin && (cleanPin.length < 4 || cleanPin.length > 6)) {
+      showToast("Staff PIN must be 4 to 6 digits.", "warning");
+      return;
+    }
+
+    if (cleanPin && isActive) {
+      const collision = staffList.find(
+        (s) =>
+          s.id !== editingStaff?.id &&
+          s.isActive !== false &&
+          verifyStaffPin(s, cleanPin)
+      );
+      if (collision) {
+        showToast(
+          `PIN already assigned to active staff member "${collision.name}". Choose a unique PIN.`,
+          "error"
+        );
+        return;
+      }
+    }
+
+    const staffId = editingStaff?.id || newId("g");
+    let resolvedPinHash: string | undefined;
+
+    if (cleanPin) {
+      resolvedPinHash = hashStaffPin(staffId, cleanPin);
+    } else if (editingStaff && !clearPin) {
+      if (editingStaff.pinHash) {
+        resolvedPinHash = editingStaff.pinHash;
+      } else if (editingStaff.pin) {
+        resolvedPinHash = hashStaffPin(staffId, editingStaff.pin);
+      }
+    }
+
+    const record: MockStaff = {
+      id: staffId,
+      name: name.trim(),
+      role,
+      phone: phone.trim() || "+65 9000 0000",
+      email:
+        email.trim() ||
+        `${name.trim().toLowerCase().replace(/\s+/g, ".")}@doglab.com`,
+      pinHash: resolvedPinHash,
+      pin: undefined,
+      isActive,
+      schedule,
+    };
+
+    if (editingStaff) {
+      updateStaff(record);
+      showToast(`Updated profile for ${record.name}.`, "success");
     } else {
-      const newStaff: MockStaff = {
-        id: `s_${Date.now()}`,
-        name: name.trim(),
-        role,
-        phone: phone.trim() || "+65 9000 0000",
-        email: email.trim() || `${name.toLowerCase().replace(/\s+/g, ".")}@doglab.com`,
-        pin: pin.trim() || undefined,
-        isActive: true,
-        schedule,
-      };
-      saveStaff(newStaff);
+      saveStaff(record);
+      showToast(`Added ${record.name} to staff roster.`, "success");
     }
 
     refreshList();
     setIsDialogOpen(false);
   };
 
-  const handleDeleteStaff = (id: string, staffName: string) => {
-    if (confirm(`Are you sure you want to delete staff member "${staffName}"?`)) {
-      deleteStaff(id);
-      refreshList();
+  const handleConfirmDelete = () => {
+    if (!deleteTarget) return;
+    if (
+      deleteTarget.role === "OWNER" &&
+      activeOwnerCountExcluding(deleteTarget.id) === 0
+    ) {
+      showToast("Cannot delete the only remaining active Owner account.", "error");
+      setDeleteTarget(null);
+      return;
     }
+    deleteStaff(deleteTarget.id);
+    showToast(`Deleted staff profile "${deleteTarget.name}".`, "info");
+    setDeleteTarget(null);
+    refreshList();
   };
 
   return (
@@ -167,10 +288,10 @@ export default function StaffPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight md:text-3xl">
-            Staff & Schedules
+            Staff &amp; Schedules
           </h1>
           <p className="text-muted-foreground">
-            Manage groomers, receptionists, their working hours, and roster
+            Manage groomers, receptionists, tablet PIN access, active status, and weekly shifts
           </p>
         </div>
 
@@ -182,108 +303,135 @@ export default function StaffPage() {
 
       {/* Staff List */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {staffList.map((staff) => (
-          <Card key={staff.id} className="shadow-sm flex flex-col justify-between hover:border-primary/50 transition-colors">
-            <div>
-              <CardHeader className="pb-3">
-                <div className="flex items-center gap-3">
-                  <Avatar className="h-12 w-12">
-                    <AvatarFallback className="bg-primary/10 text-primary font-semibold">
-                      {getInitials(staff.name)}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-1">
-                      <CardTitle className="text-base font-semibold truncate">{staff.name}</CardTitle>
-                      <Badge
-                        variant="secondary"
-                        className={`text-[10px] shrink-0 font-medium ${ROLE_COLORS[staff.role] || ""}`}
-                      >
-                        {staff.role}
-                      </Badge>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5 truncate">
-                      <Phone className="h-3 w-3 shrink-0" />
-                      <span className="truncate">{staff.phone}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5 truncate">
-                      <Mail className="h-3 w-3 shrink-0" />
-                      <span className="truncate">{staff.email}</span>
-                    </div>
-                    {staff.pin && (
-                      <div className="flex items-center gap-1.5 text-xs text-primary font-medium mt-1">
-                        <Badge variant="outline" className="text-[10px] px-1 py-0 border-primary/40 bg-primary/5">
-                          PIN Set: ••••
+        {staffList.map((staff) => {
+          const active = staff.isActive !== false;
+          const hasPin = staffHasPin(staff);
+          return (
+            <Card
+              key={staff.id}
+              className={`shadow-sm flex flex-col justify-between transition-colors ${
+                active ? "hover:border-primary/50" : "opacity-70 bg-muted/25"
+              }`}
+            >
+              <div>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center gap-3">
+                    <Avatar className="h-12 w-12">
+                      <AvatarFallback className="bg-primary/10 text-primary font-semibold">
+                        {getInitials(staff.name)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-1">
+                        <CardTitle className="text-base font-semibold truncate">
+                          {staff.name}
+                        </CardTitle>
+                        <Badge
+                          variant="secondary"
+                          className={`text-[10px] shrink-0 font-medium ${ROLE_COLORS[staff.role] || ""}`}
+                        >
+                          {staff.role}
                         </Badge>
                       </div>
-                    )}
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2 border-t pt-3">
-                  <div className="flex items-center justify-between text-xs text-muted-foreground font-medium">
-                    <div className="flex items-center gap-1.5">
-                      <Calendar className="h-3.5 w-3.5" />
-                      <span>Weekly Working Roster</span>
-                    </div>
-                    <span>{staff.isActive ? "🟢 Active" : "🔴 Inactive"}</span>
-                  </div>
-                  <div className="grid grid-cols-7 gap-1">
-                    {DAYS.map((day) => {
-                      const daySchedule = staff.schedule?.[day] || "OFF";
-                      const isOff = daySchedule === "OFF";
-                      return (
-                        <div
-                          key={day}
-                          className={`rounded-md p-1 text-center text-xs ${
-                            isOff
-                              ? "bg-muted text-muted-foreground"
-                              : "bg-primary/10 text-primary font-medium"
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5 truncate">
+                        <Phone className="h-3 w-3 shrink-0" />
+                        <span className="truncate">{staff.phone}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5 truncate">
+                        <Mail className="h-3 w-3 shrink-0" />
+                        <span className="truncate">{staff.email}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                        {hasPin ? (
+                          <Badge
+                            variant="outline"
+                            className="text-[10px] px-1.5 py-0 border-primary/40 bg-primary/5 text-primary gap-1"
+                          >
+                            <KeyRound className="h-2.5 w-2.5" /> PIN Set
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-muted-foreground">
+                            No PIN
+                          </Badge>
+                        )}
+                        <Badge
+                          variant={active ? "secondary" : "destructive"}
+                          className={`text-[10px] px-1.5 py-0 ${
+                            active ? "bg-emerald-100 text-emerald-800" : ""
                           }`}
                         >
-                          <div className="font-semibold text-[10px]">{day}</div>
-                          <div className="mt-0.5 text-[8.5px] leading-tight">
-                            {isOff ? "Off" : daySchedule.replace("-", "\n")}
-                          </div>
-                        </div>
-                      );
-                    })}
+                          {active ? "Active" : "Inactive"}
+                        </Badge>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </CardContent>
-            </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2 border-t pt-3">
+                    <div className="flex items-center justify-between text-xs text-muted-foreground font-medium">
+                      <div className="flex items-center gap-1.5">
+                        <Calendar className="h-3.5 w-3.5" />
+                        <span>Weekly Working Roster</span>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-7 gap-1">
+                      {DAYS.map((day) => {
+                        const daySchedule = staff.schedule?.[day] || "OFF";
+                        const isOff = daySchedule === "OFF";
+                        return (
+                          <div
+                            key={day}
+                            className={`rounded-md p-1 text-center text-xs ${
+                              isOff
+                                ? "bg-muted text-muted-foreground"
+                                : "bg-primary/10 text-primary font-medium"
+                            }`}
+                          >
+                            <div className="font-semibold text-[10px]">{day}</div>
+                            <div className="mt-0.5 text-[8.5px] leading-tight whitespace-pre-line">
+                              {isOff ? "Off" : daySchedule.replace("-", "\n")}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </CardContent>
+              </div>
 
-            <div className="p-4 pt-0 border-t mt-3 flex items-center justify-end gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 gap-1.5 text-xs"
-                onClick={() => handleOpenEdit(staff)}
-              >
-                <Edit className="h-3.5 w-3.5" />
-                Edit Staff & Schedule
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 w-8 p-0 text-destructive hover:bg-destructive/10"
-                onClick={() => handleDeleteStaff(staff.id, staff.name)}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-          </Card>
-        ))}
+              <div className="p-4 pt-0 border-t mt-3 flex items-center justify-end gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 text-xs"
+                  onClick={() => handleOpenEdit(staff)}
+                >
+                  <Edit className="h-3.5 w-3.5" />
+                  Edit Staff &amp; Schedule
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 p-0 text-destructive hover:bg-destructive/10"
+                  onClick={() => setDeleteTarget(staff)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </Card>
+          );
+        })}
       </div>
 
       {/* Staff Edit/Add Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editingStaffId ? "Edit Staff & Schedule" : "Add New Staff Member"}</DialogTitle>
+            <DialogTitle>
+              {editingStaff ? "Edit Staff & Schedule" : "Add New Staff Member"}
+            </DialogTitle>
             <DialogDescription>
-              Set salon role, contact information, and weekly shift schedules.
+              Set salon role, contact details, PIN keypad access, active status, and shift hours.
             </DialogDescription>
           </DialogHeader>
 
@@ -304,7 +452,7 @@ export default function StaffPage() {
                 <Label htmlFor="staffRole">Role *</Label>
                 <Select
                   value={role}
-                  onValueChange={(val) => setRole(val as any)}
+                  onValueChange={(val) => setRole(val as MockStaff["role"])}
                 >
                   <SelectTrigger id="staffRole">
                     <SelectValue placeholder="Select role" />
@@ -330,7 +478,7 @@ export default function StaffPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="staffEmail">Email Address</Label>
+                <Label htmlFor="staffEmail">Email Address (Cloud Role Match)</Label>
                 <Input
                   id="staffEmail"
                   type="email"
@@ -341,18 +489,61 @@ export default function StaffPage() {
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="staffPin">Staff Login PIN (4 - 6 Digits)</Label>
+            {/* Active / Inactive Switch */}
+            <div className="flex items-center justify-between rounded-lg border p-3 bg-muted/20">
+              <div className="pr-4">
+                <Label htmlFor="staffActiveSwitch" className="text-sm font-medium cursor-pointer">
+                  Active Staff Profile
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Inactive staff are hidden from booking groomers and blocked from PIN login.
+                </p>
+              </div>
+              <Switch
+                id="staffActiveSwitch"
+                checked={isActive}
+                onCheckedChange={setIsActive}
+              />
+            </div>
+
+            {/* PIN Input */}
+            <div className="space-y-2 rounded-lg border p-3 bg-muted/10">
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="staffPin" className="text-sm font-medium">
+                  Staff Login PIN (4–6 Digits)
+                </Label>
+                {editingStaff && staffHasPin(editingStaff) && !pinInput && (
+                  <Button
+                    type="button"
+                    variant={clearPin ? "destructive" : "ghost"}
+                    size="sm"
+                    className="h-6 text-[11px] px-2"
+                    onClick={() => setClearPin((v) => !v)}
+                  >
+                    {clearPin ? "Will Clear PIN" : "Clear Existing PIN"}
+                  </Button>
+                )}
+              </div>
               <Input
                 id="staffPin"
                 type="password"
+                inputMode="numeric"
                 maxLength={6}
-                placeholder="e.g. 1234 (for quick tablet keypad sign-in)"
-                value={pin}
-                onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
+                disabled={clearPin}
+                placeholder={
+                  editingStaff && staffHasPin(editingStaff)
+                    ? "Leave blank to keep existing PIN"
+                    : "e.g. 1234 (optional quick tablet sign-in)"
+                }
+                value={pinInput}
+                onChange={(e) => {
+                  setClearPin(false);
+                  setPinInput(e.target.value.replace(/\D/g, ""));
+                }}
               />
-              <p className="text-[11px] text-muted-foreground">
-                Allows fast front-desk login on salon tablets without typing full email passwords.
+              <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                <ShieldAlert className="h-3 w-3 shrink-0 text-primary" />
+                PINs are stored as salted SHA-256 hashes — plain PINs are never saved in readable form.
               </p>
             </div>
 
@@ -360,33 +551,61 @@ export default function StaffPage() {
             <div className="space-y-3 pt-3 border-t">
               <Label className="flex items-center gap-1.5 text-sm font-semibold">
                 <Clock className="h-4 w-4 text-primary" />
-                Weekly Work Schedule (Mon - Sun)
+                Weekly Work Schedule (Mon – Sun)
               </Label>
               <p className="text-xs text-muted-foreground">
-                Select shift hours for each day of the week or mark as day off.
+                Choose a preset shift, Custom Hours, or OFF. Used to warn when booking off-shift.
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {DAYS.map((day) => {
                   const currentVal = schedule[day] || "OFF";
+                  const isPreset = SCHEDULE_PRESETS.includes(currentVal);
+                  const selectVal = isPreset ? currentVal : CUSTOM_SHIFT;
+                  const [cStart, cEnd] = parseShiftTimes(currentVal);
+
                   return (
-                    <div key={day} className="flex items-center justify-between gap-2 p-2 rounded-lg border bg-muted/20">
-                      <span className="font-semibold text-xs w-12">{day}:</span>
-                      <Select
-                        value={currentVal}
-                        onValueChange={(val) => handleDayScheduleChange(day, val)}
-                      >
-                        <SelectTrigger className="h-8 text-xs bg-background">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="09:00-18:00">09:00 - 18:00 (Standard Full)</SelectItem>
-                          <SelectItem value="10:00-19:00">10:00 - 19:00 (Late Shift)</SelectItem>
-                          <SelectItem value="09:00-14:00">09:00 - 14:00 (Morning Half)</SelectItem>
-                          <SelectItem value="13:00-20:00">13:00 - 20:00 (Afternoon Half)</SelectItem>
-                          <SelectItem value="OFF">OFF (Rest Day)</SelectItem>
-                        </SelectContent>
-                      </Select>
+                    <div
+                      key={day}
+                      className="space-y-2 p-2.5 rounded-lg border bg-muted/20"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-semibold text-xs w-10 shrink-0">{day}:</span>
+                        <Select
+                          value={selectVal}
+                          onValueChange={(val) => handleDayPresetChange(day, val)}
+                        >
+                          <SelectTrigger className="h-8 text-xs bg-background">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="09:00-18:00">09:00 – 18:00 (Standard)</SelectItem>
+                            <SelectItem value="10:00-19:00">10:00 – 19:00 (Late)</SelectItem>
+                            <SelectItem value="09:00-14:00">09:00 – 14:00 (Morning)</SelectItem>
+                            <SelectItem value="13:00-20:00">13:00 – 20:00 (Afternoon)</SelectItem>
+                            <SelectItem value={CUSTOM_SHIFT}>Custom Hours…</SelectItem>
+                            <SelectItem value="OFF">OFF (Rest Day)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {selectVal === CUSTOM_SHIFT && (
+                        <div className="flex items-center gap-1.5 pl-10">
+                          <Input
+                            type="time"
+                            value={cStart}
+                            onChange={(e) => handleCustomTimeChange(day, "start", e.target.value)}
+                            className="h-7 text-xs bg-background px-2"
+                          />
+                          <span className="text-xs text-muted-foreground">to</span>
+                          <Input
+                            type="time"
+                            value={cEnd}
+                            onChange={(e) => handleCustomTimeChange(day, "end", e.target.value)}
+                            className="h-7 text-xs bg-background px-2"
+                          />
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -403,12 +622,33 @@ export default function StaffPage() {
               </Button>
               <Button type="submit" className="gap-2">
                 <Check className="h-4 w-4" />
-                {editingStaffId ? "Save Changes" : "Create Staff Profile"}
+                {editingStaff ? "Save Changes" : "Create Staff Profile"}
               </Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* DELETE STAFF CONFIRMATION */}
+      <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Staff Member?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to remove <strong>{deleteTarget?.name}</strong>? Historical appointments will keep their name on record. Consider marking them Inactive instead if they may return.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete Staff
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

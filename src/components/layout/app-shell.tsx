@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -18,8 +18,11 @@ import {
   Shield,
   ShieldCheck,
   Check,
-  User,
   Sliders,
+  Settings,
+  KeyRound,
+  RefreshCw,
+  MoreHorizontal,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -35,26 +38,35 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
-import { hydrateFromCloud, getStaff } from "@/lib/mock-data";
+import {
+  hydrateFromCloud,
+  getStaff,
+  refreshFromCloudIfClean,
+  retryPendingSync,
+  getPendingSyncCount,
+  runDailyAutoBackupIfNeeded,
+} from "@/lib/mock-data";
 
-type UserRole = "OWNER" | "RECEPTIONIST" | "GROOMER";
+export type UserRole = "OWNER" | "RECEPTIONIST" | "GROOMER";
 
 interface NavItem {
   href: string;
   label: string;
+  shortLabel?: string;
   icon: React.ComponentType<{ className?: string }>;
   roles: UserRole[];
 }
 
 const ALL_NAV_ITEMS: NavItem[] = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard, roles: ["OWNER", "RECEPTIONIST", "GROOMER"] },
+  { href: "/", label: "Dashboard", shortLabel: "Home", icon: LayoutDashboard, roles: ["OWNER", "RECEPTIONIST", "GROOMER"] },
   { href: "/calendar", label: "Calendar", icon: Calendar, roles: ["OWNER", "RECEPTIONIST", "GROOMER"] },
-  { href: "/appointments", label: "Appointments", icon: Scissors, roles: ["OWNER", "RECEPTIONIST", "GROOMER"] },
+  { href: "/appointments", label: "Appointments", shortLabel: "Appts", icon: Scissors, roles: ["OWNER", "RECEPTIONIST", "GROOMER"] },
   { href: "/customers", label: "Customers", icon: Users, roles: ["OWNER", "RECEPTIONIST"] },
-  { href: "/pets", label: "Pets Directory", icon: PawPrint, roles: ["OWNER", "RECEPTIONIST", "GROOMER"] },
-  { href: "/services", label: "Services & Pricing", icon: Sparkles, roles: ["OWNER"] },
-  { href: "/reports", label: "Daily Reports", icon: BarChart3, roles: ["OWNER"] },
-  { href: "/staff", label: "Staff & Shifts", icon: UserCog, roles: ["OWNER"] },
+  { href: "/pets", label: "Pets Directory", shortLabel: "Pets", icon: PawPrint, roles: ["OWNER", "RECEPTIONIST", "GROOMER"] },
+  { href: "/services", label: "Services & Pricing", shortLabel: "Services", icon: Sparkles, roles: ["OWNER"] },
+  { href: "/reports", label: "Daily Reports", shortLabel: "Reports", icon: BarChart3, roles: ["OWNER"] },
+  { href: "/staff", label: "Staff & Shifts", shortLabel: "Staff", icon: UserCog, roles: ["OWNER"] },
+  { href: "/settings", label: "Settings & Backups", shortLabel: "Settings", icon: Settings, roles: ["OWNER"] },
 ];
 
 const ROLE_PROFILES = [
@@ -64,23 +76,26 @@ const ROLE_PROFILES = [
     name: "Jason Lim",
     email: "owner@doglab.com",
     badgeColor: "bg-purple-100 text-purple-800 border-purple-300",
-    description: "Unrestricted access to all departments: pricing, staff schedules, POS, financial revenue reports.",
+    description:
+      "Unrestricted access to all departments: pricing, staff schedules, POS, financial revenue reports, and backups.",
   },
   {
     role: "RECEPTIONIST" as UserRole,
     title: "Front Desk Receptionist",
-    name: "Cindy Tan",
+    name: "Cindy Ong",
     email: "cindy@doglab.com",
     badgeColor: "bg-green-100 text-green-800 border-green-300",
-    description: "Bookings, check-in, payments, walk-ins, and customer profiles. Financial reports & staff editing hidden.",
+    description:
+      "Bookings, check-in, payments, walk-ins, and customer profiles. Financial reports & staff editing hidden.",
   },
   {
     role: "GROOMER" as UserRole,
     title: "Senior Stylist / Groomer",
-    name: "Amy Wong",
+    name: "Amy Chen",
     email: "amy@doglab.com",
     badgeColor: "bg-blue-100 text-blue-800 border-blue-300",
-    description: "Grooming station view: daily appointments, haircut styles, skin condition logging, and pet warning alerts.",
+    description:
+      "Grooming station view: daily appointments, haircut styles, skin condition logging, and pet warning alerts.",
   },
 ];
 
@@ -92,41 +107,59 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [isRoleModalOpen, setIsRoleModalOpen] = useState(false);
   const [phase, setPhase] = useState<"loading" | "ready" | "error">("loading");
   const [loadError, setLoadError] = useState("");
-  const [userEmail, setUserEmail] = useState("");
+  const [displayStaffLabel, setDisplayStaffLabel] = useState("");
   const [syncError, setSyncError] = useState("");
+  const [pendingCount, setPendingCount] = useState(0);
+  const [retryingSync, setRetryingSync] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
 
   const isLoginPage = pathname === "/login";
 
-  // Demo mode only: remembered role switcher choice
+  // Demo mode: sync remembered role & active demo PIN staff name
   useEffect(() => {
     if (isSupabaseConfigured) return;
-    const saved = localStorage.getItem("nimbus_current_role") as UserRole;
-    if (saved && ["OWNER", "RECEPTIONIST", "GROOMER"].includes(saved)) {
-      setCurrentRole(saved);
-    }
-  }, []);
+    const saved = localStorage.getItem("nimbus_current_role") as UserRole | null;
+    const activeId = localStorage.getItem("nimbus_active_staff_id");
+    const staffList = getStaff();
+    const matched = activeId ? staffList.find((s) => s.id === activeId && s.isActive !== false) : undefined;
 
-  // Cloud mode: require a session, then load data from Supabase before rendering any page
-  useEffect(() => {
-    if (!isSupabaseConfigured) {
-      setPhase("ready");
-      return;
+    if (matched) {
+      setCurrentRole(matched.role);
+      setDisplayStaffLabel(`${matched.name} (${matched.role})`);
+      localStorage.setItem("nimbus_current_role", matched.role);
+      window.dispatchEvent(new CustomEvent("nimbus-role-changed", { detail: matched.role }));
+    } else if (saved && ["OWNER", "RECEPTIONIST", "GROOMER"].includes(saved)) {
+      setCurrentRole(saved);
+      setDisplayStaffLabel("");
     }
+    setPhase("ready");
+  }, [pathname]);
+
+  // Cloud mode: require real Supabase Auth session, enforce PIN lock if active, then hydrate
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
     if (isLoginPage) return;
 
     let cancelled = false;
     setPhase("loading");
+    setLoadError("");
+
     (async () => {
-      // Check if logged in via PIN or Supabase session
-      const hasPinAuth = Boolean(localStorage.getItem("nimbus_active_staff_id"));
       const { data } = await supabase.auth.getSession();
       const user = data.session?.user;
 
-      if (!user && !hasPinAuth) {
+      if (!user) {
+        localStorage.removeItem("nimbus_active_staff_id");
+        localStorage.removeItem("nimbus_pin_locked");
         router.replace("/login");
         return;
       }
+
+      if (localStorage.getItem("nimbus_pin_locked") === "1") {
+        router.replace("/login");
+        return;
+      }
+
       try {
         await hydrateFromCloud();
       } catch (err) {
@@ -137,60 +170,168 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         return;
       }
       if (cancelled) return;
-      
-      // Check if a staff member PIN logged in or was selected
-      const activeStaffId = localStorage.getItem("nimbus_active_staff_id");
-      const allStaff = getStaff();
-      const pinStaff = activeStaffId ? allStaff.find((s) => s.id === activeStaffId) : undefined;
 
-      const email = user?.email || "";
-      const staffMatch = pinStaff || (email ? allStaff.find((s) => s.email?.toLowerCase() === email.toLowerCase()) : undefined);
-      const metaRole = (user?.user_metadata?.role || user?.app_metadata?.role) as UserRole | undefined;
-      const role: UserRole =
-        (staffMatch?.role as UserRole | undefined) ||
-        (metaRole && ["OWNER", "RECEPTIONIST", "GROOMER"].includes(metaRole) ? metaRole : "OWNER");
-      
-      setUserEmail(staffMatch ? `${staffMatch.name} (${staffMatch.role})` : (email || "Staff Member"));
-      setCurrentRole(role);
+      const allStaff = getStaff();
+      const activeStaffId = localStorage.getItem("nimbus_active_staff_id");
+      const pinStaff = activeStaffId
+        ? allStaff.find((s) => s.id === activeStaffId)
+        : undefined;
+
+      if (pinStaff && pinStaff.isActive === false) {
+        localStorage.removeItem("nimbus_active_staff_id");
+        setLoadError("This staff profile is marked inactive. Sign in with an active staff account.");
+        setPhase("error");
+        return;
+      }
+
+      const email = user.email || "";
+      const emailStaff = email
+        ? allStaff.find((s) => s.email?.toLowerCase() === email.toLowerCase())
+        : undefined;
+
+      const staffMatch = pinStaff || emailStaff;
+      if (staffMatch && staffMatch.isActive === false) {
+        setLoadError(`Staff profile for ${staffMatch.name} is inactive. Contact the salon owner.`);
+        setPhase("error");
+        return;
+      }
+
+      const metaRole = (user.user_metadata?.role || user.app_metadata?.role) as UserRole | undefined;
+      const validMetaRole =
+        metaRole && ["OWNER", "RECEPTIONIST", "GROOMER"].includes(metaRole) ? metaRole : undefined;
+
+      let resolvedRole: UserRole | undefined =
+        (staffMatch?.role as UserRole | undefined) || validMetaRole;
+
+      if (!resolvedRole) {
+        const hasConfiguredOwner = allStaff.some(
+          (s) =>
+            s.role === "OWNER" &&
+            (Boolean(s.pinHash) || (s.email && s.email.toLowerCase() !== "owner@doglab.com"))
+        );
+        if (hasConfiguredOwner) {
+          setLoadError(
+            `Your account (${email || "unknown"}) is not linked to an active staff profile. Ask the salon owner to add your email under Staff & Shifts.`
+          );
+          setPhase("error");
+          return;
+        }
+        resolvedRole = "OWNER";
+      }
+
+      localStorage.setItem("nimbus_current_role", resolvedRole);
+      if (staffMatch) {
+        localStorage.setItem("nimbus_active_staff_id", staffMatch.id);
+      }
+      window.dispatchEvent(new CustomEvent("nimbus-role-changed", { detail: resolvedRole }));
+
+      setDisplayStaffLabel(
+        staffMatch ? `${staffMatch.name} (${staffMatch.role})` : email || "Staff Member"
+      );
+      setCurrentRole(resolvedRole);
+      setPendingCount(getPendingSyncCount());
       setPhase("ready");
+
+      if (resolvedRole === "OWNER") {
+        runDailyAutoBackupIfNeeded();
+      }
     })();
+
     return () => {
       cancelled = true;
     };
   }, [isLoginPage, retryCount, router]);
 
-  // Sign-out from anywhere (or from another tab) sends you back to the login screen
+  // Run daily auto-backup once ready in Demo Mode for OWNER as well
+  useEffect(() => {
+    if (isSupabaseConfigured || phase !== "ready" || isLoginPage) return;
+    if (currentRole === "OWNER") {
+      runDailyAutoBackupIfNeeded();
+    }
+  }, [phase, currentRole, isLoginPage]);
+
+  // Keep Supabase auth state listener + multi-tab visibility refresh
   useEffect(() => {
     if (!isSupabaseConfigured) return;
     const { data } = supabase.auth.onAuthStateChange((event) => {
-      if (event === "SIGNED_OUT") router.replace("/login");
+      if (event === "SIGNED_OUT") {
+        localStorage.removeItem("nimbus_active_staff_id");
+        localStorage.removeItem("nimbus_pin_locked");
+        router.replace("/login");
+      }
     });
     return () => data.subscription.unsubscribe();
   }, [router]);
 
-  // Surface failed cloud writes so data is never silently lost
   useEffect(() => {
-    const onSyncError = (e: Event) => setSyncError((e as CustomEvent<string>).detail);
+    const updatePending = () => setPendingCount(getPendingSyncCount());
+    const onSyncError = (e: Event) => {
+      setSyncError((e as CustomEvent<string>).detail || "");
+      updatePending();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible" && isSupabaseConfigured && !isLoginPage) {
+        refreshFromCloudIfClean().then(updatePending);
+      }
+    };
+    const onFocus = () => {
+      if (isSupabaseConfigured && !isLoginPage) {
+        refreshFromCloudIfClean().then(updatePending);
+      }
+    };
+
     window.addEventListener("nimbus-sync-error", onSyncError);
-    return () => window.removeEventListener("nimbus-sync-error", onSyncError);
+    window.addEventListener("nimbus-data-updated", updatePending);
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener("nimbus-sync-error", onSyncError);
+      window.removeEventListener("nimbus-data-updated", updatePending);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [isLoginPage]);
+
+  const handleManualSync = useCallback(async () => {
+    setRetryingSync(true);
+    try {
+      await retryPendingSync();
+      setPendingCount(getPendingSyncCount());
+      if (getPendingSyncCount() === 0) setSyncError("");
+    } finally {
+      setRetryingSync(false);
+    }
   }, []);
 
   const handleRoleChange = (role: UserRole) => {
-    if (isSupabaseConfigured) return; // real roles come from the signed-in account
-    setCurrentRole(role);
+    if (isSupabaseConfigured) return;
+    localStorage.removeItem("nimbus_active_staff_id");
     localStorage.setItem("nimbus_current_role", role);
+    setCurrentRole(role);
+    setDisplayStaffLabel("");
+    window.dispatchEvent(new CustomEvent("nimbus-role-changed", { detail: role }));
     setIsRoleModalOpen(false);
   };
 
+  const handleLockForPinSwitch = () => {
+    localStorage.setItem("nimbus_pin_locked", "1");
+    localStorage.removeItem("nimbus_active_staff_id");
+    setSidebarOpen(false);
+    router.replace("/login");
+  };
+
   const handleSignOut = async () => {
-    await supabase.auth.signOut();
+    if (isSupabaseConfigured) {
+      await supabase.auth.signOut();
+    }
     localStorage.removeItem("nimbus_current_role");
     localStorage.removeItem("nimbus_active_staff_id");
+    localStorage.removeItem("nimbus_pin_locked");
     router.replace("/login");
   };
 
   const activeProfile = ROLE_PROFILES.find((p) => p.role === currentRole) || ROLE_PROFILES[0];
-  const displayName = isSupabaseConfigured && userEmail ? userEmail : activeProfile.name;
+  const displayName = displayStaffLabel || activeProfile.name;
   const visibleNavItems = ALL_NAV_ITEMS.filter((item) => item.roles.includes(currentRole));
   const routeRule = ALL_NAV_ITEMS.find((i) => i.href !== "/" && pathname.startsWith(i.href));
   const routeAllowed = !routeRule || routeRule.roles.includes(currentRole);
@@ -201,16 +342,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return (
       <div className="flex h-dvh items-center justify-center p-6 text-center">
         {phase === "error" ? (
-          <div className="max-w-md space-y-3">
-            <p className="font-semibold text-destructive">Could not load data from Supabase</p>
+          <div className="max-w-md space-y-3 rounded-xl border bg-card p-6 shadow-sm">
+            <p className="font-semibold text-destructive">Access / Connection Issue</p>
             <p className="text-sm text-muted-foreground break-words">{loadError}</p>
-            <p className="text-xs text-muted-foreground">
-              Most common cause: the tables don&apos;t exist yet. Run <code>supabase/schema.sql</code> in the
-              Supabase SQL Editor.
-            </p>
-            <div className="flex justify-center gap-2">
+            {isSupabaseConfigured && (
+              <p className="text-xs text-muted-foreground">
+                If setting up a new database, run <code>supabase/schema.sql</code> in the Supabase SQL Editor.
+              </p>
+            )}
+            <div className="flex justify-center gap-2 pt-2">
               <Button onClick={() => setRetryCount((n) => n + 1)}>Retry</Button>
-              <Button variant="outline" onClick={handleSignOut}>Sign out</Button>
+              <Button variant="outline" onClick={handleSignOut}>
+                Sign out
+              </Button>
             </div>
           </div>
         ) : (
@@ -220,12 +364,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     );
   }
 
+  const bottomBarItems = visibleNavItems.length > 4 ? visibleNavItems.slice(0, 4) : visibleNavItems;
+  const hasMoreDrawer = visibleNavItems.length > 4;
+
   return (
-    <div className="flex h-dvh overflow-hidden bg-background">
+    <div className="app-shell-root flex h-dvh overflow-hidden bg-background">
       {/* Mobile sidebar overlay */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 z-40 bg-black/50 md:hidden"
+          className="no-print fixed inset-0 z-40 bg-black/50 md:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
@@ -233,7 +380,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {/* Sidebar — desktop: always visible, mobile: slide-over */}
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r bg-card transition-transform duration-300 md:static md:translate-x-0",
+          "no-print fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r bg-card transition-transform duration-300 md:static md:translate-x-0",
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
@@ -253,6 +400,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             size="icon"
             className="md:hidden"
             onClick={() => setSidebarOpen(false)}
+            aria-label="Close navigation menu"
           >
             <X className="h-5 w-5" />
           </Button>
@@ -287,15 +435,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </nav>
         </ScrollArea>
 
-        {/* Active Role & Hidden Admin Switcher Footer */}
-        <div className="border-t p-3 bg-muted/20 space-y-1">
+        {/* Active Role, PIN Lock & Sign Out Footer */}
+        <div className="border-t p-3 bg-muted/20 space-y-1.5">
           <div
             onClick={() => !isSupabaseConfigured && setIsRoleModalOpen(true)}
             className={cn(
               "flex items-center gap-2.5 p-2 rounded-lg transition-colors",
               !isSupabaseConfigured && "hover:bg-muted/60 cursor-pointer"
             )}
-            title={isSupabaseConfigured ? displayName : "Click to switch role or open role permissions"}
+            title={
+              isSupabaseConfigured
+                ? displayName
+                : "Click to switch simulated role or open role permissions"
+            }
           >
             <Avatar className="h-8 w-8 shrink-0">
               <AvatarFallback className="bg-primary/10 text-primary text-xs font-bold">
@@ -305,7 +457,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold truncate">{displayName}</span>
-                {!isSupabaseConfigured && <Sliders className="h-3 w-3 text-muted-foreground shrink-0 ml-1" />}
+                {!isSupabaseConfigured && (
+                  <Sliders className="h-3 w-3 text-muted-foreground shrink-0 ml-1" />
+                )}
               </div>
               <Badge
                 variant="outline"
@@ -315,36 +469,78 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </Badge>
             </div>
           </div>
-          {isSupabaseConfigured ? (
-            <Button variant="ghost" size="sm" className="w-full justify-start gap-2 text-xs" onClick={handleSignOut}>
-              <LogOut className="h-3.5 w-3.5" /> Sign out
+
+          <div className="flex flex-col gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start gap-2 text-xs h-8"
+              onClick={handleLockForPinSwitch}
+            >
+              <KeyRound className="h-3.5 w-3.5" /> Switch Staff (PIN)
             </Button>
-          ) : (
-            <p className="px-2 text-[10px] text-amber-700">Demo mode — data stays in this browser only</p>
-          )}
+
+            {isSupabaseConfigured ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-full justify-start gap-2 text-xs h-8 text-muted-foreground hover:text-destructive"
+                onClick={handleSignOut}
+              >
+                <LogOut className="h-3.5 w-3.5" /> Sign out
+              </Button>
+            ) : (
+              <p className="px-2 text-[10px] text-amber-700">
+                Demo mode — browser local storage
+              </p>
+            )}
+          </div>
         </div>
       </aside>
 
       {/* Main content area */}
-      <div className="flex flex-1 flex-col overflow-hidden">
-        {syncError && (
-          <div className="flex items-start justify-between gap-3 bg-destructive px-4 py-2 text-xs text-destructive-foreground">
-            <span>
-              Some changes could not be saved to the database ({syncError}). Check your connection and make sure
-              you are signed in, then redo the change.
+      <div className="app-shell-main flex flex-1 flex-col overflow-hidden">
+        {(syncError || pendingCount > 0) && isSupabaseConfigured && (
+          <div className="no-print flex items-center justify-between gap-3 bg-destructive px-4 py-2 text-xs text-destructive-foreground">
+            <span className="flex-1">
+              {pendingCount > 0
+                ? `${pendingCount} queued change(s) pending cloud sync${syncError ? ` (${syncError})` : ""}.`
+                : `Cloud sync notice: ${syncError}`}
             </span>
-            <button onClick={() => setSyncError("")} aria-label="Dismiss">
-              <X className="h-4 w-4" />
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                className="h-6 text-[11px] px-2 gap-1"
+                onClick={handleManualSync}
+                disabled={retryingSync}
+              >
+                <RefreshCw className={cn("h-3 w-3", retryingSync && "animate-spin")} />
+                {retryingSync ? "Syncing..." : "Retry Sync"}
+              </Button>
+              {syncError && (
+                <button
+                  type="button"
+                  onClick={() => setSyncError("")}
+                  aria-label="Dismiss"
+                  className="p-0.5 hover:opacity-80"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
           </div>
         )}
+
         {/* Top bar — mobile only */}
-        <header className="flex h-14 items-center justify-between border-b bg-card px-4 md:hidden">
+        <header className="no-print flex h-14 items-center justify-between border-b bg-card px-4 md:hidden">
           <div className="flex items-center gap-3">
             <Button
               variant="ghost"
               size="icon"
               onClick={() => setSidebarOpen(true)}
+              aria-label="Open navigation menu"
             >
               <Menu className="h-5 w-5" />
             </Button>
@@ -356,15 +552,27 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
           </div>
 
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 text-xs gap-1.5"
-            onClick={() => !isSupabaseConfigured && setIsRoleModalOpen(true)}
-          >
-            <Shield className="h-3.5 w-3.5 text-primary" />
-            <span>{currentRole}</span>
-          </Button>
+          <div className="flex items-center gap-1.5">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              onClick={handleLockForPinSwitch}
+              title="Switch Staff (PIN)"
+              aria-label="Switch Staff (PIN)"
+            >
+              <KeyRound className="h-4 w-4 text-muted-foreground" />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs gap-1.5"
+              onClick={() => !isSupabaseConfigured && setIsRoleModalOpen(true)}
+            >
+              <Shield className="h-3.5 w-3.5 text-primary" />
+              <span>{currentRole}</span>
+            </Button>
+          </div>
         </header>
 
         {/* Page content */}
@@ -373,16 +581,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             {routeAllowed ? (
               children
             ) : (
-              <div className="py-16 text-center text-sm text-muted-foreground">
-                Your role ({currentRole}) does not have access to this page.
+              <div className="py-16 text-center space-y-2">
+                <p className="text-sm font-medium">Access Restricted</p>
+                <p className="text-xs text-muted-foreground">
+                  Your role ({currentRole}) does not have permission to view this page.
+                </p>
+                <Button asChild variant="outline" size="sm" className="mt-2">
+                  <Link href="/">Return to Dashboard</Link>
+                </Button>
               </div>
             )}
           </div>
         </main>
 
         {/* Bottom nav — mobile only */}
-        <nav className="flex h-16 items-center justify-around border-t bg-card md:hidden">
-          {visibleNavItems.slice(0, 5).map((item) => {
+        <nav className="no-print flex h-16 items-center justify-around border-t bg-card md:hidden">
+          {bottomBarItems.map((item) => {
             const isActive =
               pathname === item.href ||
               (item.href !== "/" && pathname.startsWith(item.href));
@@ -392,20 +606,30 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 href={item.href}
                 className={cn(
                   "flex flex-col items-center gap-1 px-2 py-1",
-                  isActive
-                    ? "text-primary"
-                    : "text-muted-foreground"
+                  isActive ? "text-primary" : "text-muted-foreground"
                 )}
               >
                 <item.icon className="h-5 w-5" />
-                <span className="text-[10px] font-medium">{item.label}</span>
+                <span className="text-[10px] font-medium">
+                  {item.shortLabel || item.label}
+                </span>
               </Link>
             );
           })}
+          {hasMoreDrawer && (
+            <button
+              type="button"
+              onClick={() => setSidebarOpen(true)}
+              className="flex flex-col items-center gap-1 px-2 py-1 text-muted-foreground hover:text-foreground"
+            >
+              <MoreHorizontal className="h-5 w-5" />
+              <span className="text-[10px] font-medium">More</span>
+            </button>
+          )}
         </nav>
       </div>
 
-      {/* HIDDEN ADMIN / ROLE SWITCHER MODAL */}
+      {/* DEMO MODE ROLE SWITCHER MODAL */}
       <Dialog open={isRoleModalOpen} onOpenChange={setIsRoleModalOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -414,7 +638,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               Role & Access Control Switcher
             </DialogTitle>
             <DialogDescription>
-              Test or simulate how different salon staff roles experience Nimbus.
+              Preview how different salon staff roles experience Nimbus in Demo Mode.
             </DialogDescription>
           </DialogHeader>
 
@@ -467,9 +691,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="rounded-lg bg-muted/40 p-3 text-xs text-muted-foreground border mt-2">
             <span className="font-semibold text-foreground block mb-0.5">Role Permission Breakdown:</span>
             <ul className="list-disc list-inside space-y-0.5 text-[11px]">
-              <li><strong className="text-foreground">Owner</strong>: All pages (Dashboard, Calendar, Appointments, Customers, Pets, Services & Pricing, Daily Reports, Staff & Salaries).</li>
-              <li><strong className="text-foreground">Receptionist</strong>: Bookings, Walk-ins, Customers, Pets, Calendar.</li>
-              <li><strong className="text-foreground">Groomer</strong>: Personal Station, Calendar, Appointments, Pet Grooming Profiles & Alerts.</li>
+              <li>
+                <strong className="text-foreground">Owner</strong>: All pages including Services &amp; Pricing, Daily Reports, Staff &amp; Shifts, and Settings &amp; Backups.
+              </li>
+              <li>
+                <strong className="text-foreground">Receptionist</strong>: Bookings, Walk-ins, Customers, Pets, POS Checkout, Calendar.
+              </li>
+              <li>
+                <strong className="text-foreground">Groomer</strong>: Personal Station, Calendar, Appointments, Grooming Notes &amp; Pet Warnings.
+              </li>
             </ul>
           </div>
         </DialogContent>

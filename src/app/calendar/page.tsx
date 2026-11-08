@@ -1,23 +1,30 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import interactionPlugin from "@fullcalendar/interaction";
 import { Button } from "@/components/ui/button";
-import { Plus, Clock, Settings2 } from "lucide-react";
+import { Plus, Clock, AlertTriangle, StickyNote } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   getAppointments,
   saveAppointment,
+  getCustomers,
+  getStaff,
   STATUS_COLORS_HEX,
   MockAppointment,
+  MockStaff,
+  MockPet,
   getSalonSettings,
   saveSalonSettings,
   SalonSettings,
   DEFAULT_SALON_SETTINGS,
+  findOverlappingAppointments,
+  getStaffShiftForDate,
+  isTimeWithinShift,
 } from "@/lib/mock-data";
 import { APPOINTMENT_STATUS_LABELS } from "@/lib/utils";
 import {
@@ -36,36 +43,59 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { showToast } from "@/components/ui/toast-system";
 
 export default function CalendarPage() {
   const router = useRouter();
   const calendarRef = useRef<FullCalendar>(null);
   const [isMobile, setIsMobile] = useState(false);
   const [appointments, setAppointments] = useState<MockAppointment[]>([]);
-  const [showLegend, setShowLegend] = useState(false);
-  const [visibleRange, setVisibleRange] = useState<{ start: Date; end: Date; title: string } | null>(null);
+  const [staffList, setStaffList] = useState<MockStaff[]>([]);
+  const [petsById, setPetsById] = useState<Record<string, MockPet>>({});
 
-  // Calendar Hours / Operating Hours Settings
+  const [groomerFilter, setGroomerFilter] = useState<string>("ALL");
+  const [hideCancelled, setHideCancelled] = useState<boolean>(true);
+  const [showLegend, setShowLegend] = useState(false);
+  const [visibleRange, setVisibleRange] = useState<{
+    start: Date;
+    end: Date;
+    title: string;
+  } | null>(null);
+
   const [salonSettings, setSalonSettings] = useState<SalonSettings>(DEFAULT_SALON_SETTINGS);
   const [isHoursModalOpen, setIsHoursModalOpen] = useState(false);
   const [tempStart, setTempStart] = useState("08:00");
   const [tempEnd, setTempEnd] = useState("21:00");
 
-  useEffect(() => {
-    const checkMobile = () => setIsMobile(window.innerWidth < 768);
-    checkMobile();
-    window.addEventListener("resize", checkMobile);
+  const loadData = () => {
     setAppointments(getAppointments());
+    setStaffList(getStaff().filter((s) => s.isActive !== false));
+    const map: Record<string, MockPet> = {};
+    getCustomers().forEach((c) => c.pets.forEach((p) => (map[p.id] = p)));
+    setPetsById(map);
+
     const settings = getSalonSettings();
     setSalonSettings(settings);
     setTempStart(settings.calendarStartTime);
     setTempEnd(settings.calendarEndTime);
-    return () => window.removeEventListener("resize", checkMobile);
+  };
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    loadData();
+    window.addEventListener("nimbus-data-updated", loadData);
+    return () => {
+      window.removeEventListener("resize", checkMobile);
+      window.removeEventListener("nimbus-data-updated", loadData);
+    };
   }, []);
 
   function handleEventDrop(info: any) {
-    const newStart = info.event.start;
-    const newEnd = info.event.end;
+    const newStart: Date | null = info.event.start;
+    const newEnd: Date | null = info.event.end;
     if (!newStart) return;
 
     const year = newStart.getFullYear();
@@ -73,101 +103,162 @@ export default function CalendarPage() {
     const day = String(newStart.getDate()).padStart(2, "0");
     const dateStr = `${year}-${month}-${day}`;
 
-    const startHours = String(newStart.getHours()).padStart(2, "0");
-    const startMins = String(newStart.getMinutes()).padStart(2, "0");
-    const startTime = `${startHours}:${startMins}`;
+    const startTime = `${String(newStart.getHours()).padStart(2, "0")}:${String(
+      newStart.getMinutes()
+    ).padStart(2, "0")}`;
 
     let endTime = "";
-    if (newEnd) {
-      const endHours = String(newEnd.getHours()).padStart(2, "0");
-      const endMins = String(newEnd.getMinutes()).padStart(2, "0");
-      endTime = `${endHours}:${endMins}`;
+    if (newEnd && newEnd.getDate() === newStart.getDate()) {
+      endTime = `${String(newEnd.getHours()).padStart(2, "0")}:${String(
+        newEnd.getMinutes()
+      ).padStart(2, "0")}`;
     } else {
-      const original = appointments.find((a) => a.id === info.event.id);
+      const original = getAppointments().find((a) => a.id === info.event.id);
       const dur = original?.serviceDuration || 60;
       const endD = new Date(newStart.getTime() + dur * 60000);
-      endTime = `${String(endD.getHours()).padStart(2, "0")}:${String(endD.getMinutes()).padStart(2, "0")}`;
+      endTime =
+        endD.getDate() !== newStart.getDate()
+          ? "23:45"
+          : `${String(endD.getHours()).padStart(2, "0")}:${String(
+              endD.getMinutes()
+            ).padStart(2, "0")}`;
     }
 
-    const current = getAppointments();
-    const apt = current.find((a) => a.id === info.event.id);
-    if (apt) {
-      const updatedApt: MockAppointment = {
-        ...apt,
-        dateStr,
-        startTime,
-        endTime,
-      };
-      saveAppointment(updatedApt);
-      setAppointments(getAppointments());
+    const apt = getAppointments().find((a) => a.id === info.event.id);
+    if (!apt) return;
+
+    const updatedApt: MockAppointment = {
+      ...apt,
+      dateStr,
+      startTime,
+      endTime,
+    };
+    saveAppointment(updatedApt);
+    setAppointments(getAppointments());
+
+    const overlaps = findOverlappingAppointments(
+      apt.groomerId,
+      dateStr,
+      startTime,
+      endTime,
+      apt.id
+    );
+    const staffMember = staffList.find((s) => s.id === apt.groomerId);
+    const shift = getStaffShiftForDate(staffMember, dateStr);
+    const inShift = isTimeWithinShift(startTime, endTime, shift);
+
+    if (overlaps.length > 0) {
+      showToast(
+        `Moved to ${dateStr} ${startTime}, but ${apt.groomerName} overlaps with ${overlaps[0].petName}.`,
+        "warning"
+      );
+    } else if (!inShift) {
+      showToast(
+        `Moved to ${dateStr} ${startTime}, outside ${apt.groomerName}'s shift (${shift}).`,
+        "warning"
+      );
+    } else {
+      showToast(`Rescheduled ${apt.petName} to ${dateStr} ${startTime}.`, "success");
     }
   }
 
   function handleEventResize(info: any) {
-    const newStart = info.event.start;
-    const newEnd = info.event.end;
+    const newStart: Date | null = info.event.start;
+    const newEnd: Date | null = info.event.end;
     if (!newStart || !newEnd) return;
 
-    const startHours = String(newStart.getHours()).padStart(2, "0");
-    const startMins = String(newStart.getMinutes()).padStart(2, "0");
-    const startTime = `${startHours}:${startMins}`;
+    const startTime = `${String(newStart.getHours()).padStart(2, "0")}:${String(
+      newStart.getMinutes()
+    ).padStart(2, "0")}`;
 
-    const endHours = String(newEnd.getHours()).padStart(2, "0");
-    const endMins = String(newEnd.getMinutes()).padStart(2, "0");
-    const endTime = `${endHours}:${endMins}`;
+    const endTime =
+      newEnd.getDate() !== newStart.getDate()
+        ? "23:45"
+        : `${String(newEnd.getHours()).padStart(2, "0")}:${String(
+            newEnd.getMinutes()
+          ).padStart(2, "0")}`;
 
     const durationMins = Math.round((newEnd.getTime() - newStart.getTime()) / 60000);
+    const apt = getAppointments().find((a) => a.id === info.event.id);
+    if (!apt) return;
 
-    const current = getAppointments();
-    const apt = current.find((a) => a.id === info.event.id);
-    if (apt) {
-      const updatedApt: MockAppointment = {
-        ...apt,
-        startTime,
-        endTime,
-        serviceDuration: durationMins > 0 ? durationMins : apt.serviceDuration,
-      };
-      saveAppointment(updatedApt);
-      setAppointments(getAppointments());
+    const updatedApt: MockAppointment = {
+      ...apt,
+      startTime,
+      endTime,
+      serviceDuration: durationMins > 0 ? durationMins : apt.serviceDuration,
+    };
+    saveAppointment(updatedApt);
+    setAppointments(getAppointments());
+
+    const overlaps = findOverlappingAppointments(
+      apt.groomerId,
+      apt.dateStr,
+      startTime,
+      endTime,
+      apt.id
+    );
+    if (overlaps.length > 0) {
+      showToast(
+        `Updated duration, but overlaps ${overlaps[0].petName} (${overlaps[0].startTime}).`,
+        "warning"
+      );
+    } else {
+      showToast(`Updated ${apt.petName}'s slot duration to ${updatedApt.serviceDuration} mins.`, "success");
     }
   }
 
   function handleSaveHours(e: React.FormEvent) {
     e.preventDefault();
-    const updated: SalonSettings = {
+    const updated = saveSalonSettings({
       calendarStartTime: tempStart,
       calendarEndTime: tempEnd,
-    };
-    saveSalonSettings(updated);
+    });
     setSalonSettings(updated);
     setIsHoursModalOpen(false);
+    showToast("Calendar operating hours updated.", "success");
   }
 
-  const visibleAppointments = appointments.filter((apt) => {
+  const filteredAppointments = useMemo(() => {
+    return appointments.filter((apt) => {
+      if (hideCancelled && (apt.status === "CANCELLED" || apt.status === "NO_SHOW")) {
+        return false;
+      }
+      if (groomerFilter !== "ALL" && apt.groomerId !== groomerFilter) {
+        return false;
+      }
+      return true;
+    });
+  }, [appointments, hideCancelled, groomerFilter]);
+
+  const visibleAppointments = filteredAppointments.filter((apt) => {
     if (!visibleRange) return true;
     const aptDate = new Date(`${apt.dateStr}T00:00:00`);
     return aptDate >= visibleRange.start && aptDate < visibleRange.end;
   });
 
-  const statusCounts = visibleAppointments.reduce(
-    (acc, a) => {
-      acc[a.status] = (acc[a.status] || 0) + 1;
-      return acc;
-    },
-    {} as Record<string, number>
-  );
+  const statusCounts = visibleAppointments.reduce((acc, a) => {
+    acc[a.status] = (acc[a.status] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
 
-  const events = appointments.map((apt) => {
+  const events = filteredAppointments.map((apt) => {
     const colors = STATUS_COLORS_HEX[apt.status] || {
       bg: "#3b82f6",
       border: "#2563eb",
       text: "#ffffff",
     };
+    const pet = petsById[apt.petId];
+    const hasWarnings = (pet?.warnings?.length || 0) > 0;
+    const isLocked =
+      apt.isPaid || ["DONE", "CANCELLED", "NO_SHOW"].includes(apt.status);
+
     return {
       id: apt.id,
       title: `${apt.petName} (${apt.serviceName})`,
       start: `${apt.dateStr}T${apt.startTime}:00`,
       end: `${apt.dateStr}T${apt.endTime}:00`,
+      editable: !isLocked,
       backgroundColor: colors.bg,
       borderColor: colors.border,
       textColor: colors.text,
@@ -178,6 +269,9 @@ export default function CalendarPage() {
         groomerName: apt.groomerName,
         status: apt.status,
         isPaid: apt.isPaid,
+        hasWarnings,
+        warningsText: pet?.warnings?.join(", ") || "",
+        notes: apt.notes || "",
       },
     };
   });
@@ -187,15 +281,10 @@ export default function CalendarPage() {
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight md:text-3xl">
-            Calendar
-          </h1>
-          <p className="text-muted-foreground">
-            Schedule view by day, week, and month
-          </p>
+          <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Calendar</h1>
+          <p className="text-muted-foreground">Schedule view by day, week, and month</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {/* Subtle utility controls */}
           <div className="flex items-center gap-0.5 rounded-lg border bg-muted/30 p-0.5 mr-1">
             <Button
               variant="ghost"
@@ -223,7 +312,6 @@ export default function CalendarPage() {
             </Button>
           </div>
 
-          {/* Primary Focus Actions */}
           <Button asChild size="sm" className="font-semibold shadow-xs">
             <Link href="/appointments/new">
               <Plus className="mr-1.5 h-4 w-4" />
@@ -239,68 +327,66 @@ export default function CalendarPage() {
         </div>
       </div>
 
+      {/* Filter Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-card px-4 py-2.5 shadow-sm">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <Label htmlFor="cal-groomer-filter" className="text-xs text-muted-foreground whitespace-nowrap">
+              Staff / Groomer:
+            </Label>
+            <Select value={groomerFilter} onValueChange={setGroomerFilter}>
+              <SelectTrigger id="cal-groomer-filter" className="h-8 w-[170px] text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">All Staff</SelectItem>
+                {staffList.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.name} ({s.role === "GROOMER" ? "Groomer" : s.role})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Switch
+            id="hide-cancelled"
+            checked={hideCancelled}
+            onCheckedChange={setHideCancelled}
+          />
+          <Label htmlFor="hide-cancelled" className="text-xs cursor-pointer text-muted-foreground">
+            Hide Cancelled / No-Show
+          </Label>
+        </div>
+      </div>
+
       {/* Calendar Card */}
       <div className="rounded-xl border bg-card p-3 shadow-sm md:p-6 space-y-4">
-        {/* Status Legend Bar with Live Dynamic Counts for Currently Viewed Date Range */}
         {showLegend && (
           <div className="flex flex-wrap items-center gap-2 sm:gap-4 p-3 bg-muted/40 rounded-lg border text-xs animate-in fade-in duration-150">
             <span className="font-semibold text-foreground text-[11px] uppercase tracking-wider">
               {visibleRange?.title ? `${visibleRange.title} Status:` : "Status:"}
             </span>
-            <div className="flex items-center gap-1.5">
-              <span className="h-2.5 w-2.5 rounded-full bg-[#3b82f6] shadow-xs"></span>
-              <span className="font-medium text-foreground">Booked</span>
-              {statusCounts["BOOKED"] ? (
-                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 font-bold">
-                  {statusCounts["BOOKED"]}
-                </span>
-              ) : null}
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="h-2.5 w-2.5 rounded-full bg-[#f59e0b] shadow-xs"></span>
-              <span className="font-medium text-foreground">Arrived</span>
-              {statusCounts["ARRIVED"] ? (
-                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 font-bold">
-                  {statusCounts["ARRIVED"]}
-                </span>
-              ) : null}
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="h-2.5 w-2.5 rounded-full bg-[#8b5cf6] shadow-xs"></span>
-              <span className="font-medium text-foreground">In Progress</span>
-              {statusCounts["IN_PROGRESS"] ? (
-                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 font-bold">
-                  {statusCounts["IN_PROGRESS"]}
-                </span>
-              ) : null}
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="h-2.5 w-2.5 rounded-full bg-[#10b981] shadow-xs"></span>
-              <span className="font-medium text-foreground">Done</span>
-              {statusCounts["DONE"] ? (
-                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-bold">
-                  {statusCounts["DONE"]}
-                </span>
-              ) : null}
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="h-2.5 w-2.5 rounded-full bg-[#6b7280] shadow-xs"></span>
-              <span className="font-medium text-foreground">No Show</span>
-              {statusCounts["NO_SHOW"] ? (
-                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300 font-bold">
-                  {statusCounts["NO_SHOW"]}
-                </span>
-              ) : null}
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="h-2.5 w-2.5 rounded-full bg-[#ef4444] shadow-xs"></span>
-              <span className="font-medium text-foreground">Cancelled</span>
-              {statusCounts["CANCELLED"] ? (
-                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300 font-bold">
-                  {statusCounts["CANCELLED"]}
-                </span>
-              ) : null}
-            </div>
+            {[
+              { key: "BOOKED", label: "Booked", dot: "#3b82f6", pill: "bg-blue-100 text-blue-800" },
+              { key: "ARRIVED", label: "Arrived", dot: "#f59e0b", pill: "bg-amber-100 text-amber-800" },
+              { key: "IN_PROGRESS", label: "In Progress", dot: "#8b5cf6", pill: "bg-purple-100 text-purple-800" },
+              { key: "DONE", label: "Done", dot: "#10b981", pill: "bg-emerald-100 text-emerald-800" },
+              { key: "NO_SHOW", label: "No Show", dot: "#6b7280", pill: "bg-gray-100 text-gray-800" },
+              { key: "CANCELLED", label: "Cancelled", dot: "#ef4444", pill: "bg-red-100 text-red-800" },
+            ].map((item) => (
+              <div key={item.key} className="flex items-center gap-1.5">
+                <span className="h-2.5 w-2.5 rounded-full shadow-xs" style={{ backgroundColor: item.dot }} />
+                <span className="font-medium text-foreground">{item.label}</span>
+                {statusCounts[item.key] ? (
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${item.pill}`}>
+                    {statusCounts[item.key]}
+                  </span>
+                ) : null}
+              </div>
+            ))}
           </div>
         )}
 
@@ -312,9 +398,7 @@ export default function CalendarPage() {
           headerToolbar={{
             left: "prev,next today",
             center: "title",
-            right: isMobile
-              ? "timeGridDay,dayGridMonth"
-              : "timeGridDay,timeGridWeek,dayGridMonth",
+            right: "timeGridDay,timeGridWeek,dayGridMonth",
           }}
           buttonText={{
             today: "Today",
@@ -372,19 +456,28 @@ export default function CalendarPage() {
             const props = arg.event.extendedProps;
             const start = arg.event.start;
             const end = arg.event.end;
-            const durationMins = start && end ? Math.round((end.getTime() - start.getTime()) / 60000) : 60;
+            const durationMins =
+              start && end ? Math.round((end.getTime() - start.getTime()) / 60000) : 60;
             const isShortSlot = durationMins <= 35;
             const statusLabel = APPOINTMENT_STATUS_LABELS[props.status] || props.status;
+            const tooltip = `${props.petName} (${props.petBreed}) - ${props.serviceName} | ${statusLabel} | Groomer: ${props.groomerName}${
+              props.isPaid ? " | Paid" : ""
+            }${props.warningsText ? ` | Alert: ${props.warningsText}` : ""}${
+              props.notes ? ` | Note: ${props.notes}` : ""
+            }`;
 
-            // Month View (dayGrid) Event Rendering - Solid Colored Badge
             if (arg.view.type === "dayGridMonth") {
               return (
                 <div
-                  style={{ backgroundColor: arg.event.backgroundColor, borderColor: arg.event.borderColor }}
+                  style={{
+                    backgroundColor: arg.event.backgroundColor,
+                    borderColor: arg.event.borderColor,
+                  }}
                   className="flex items-center justify-between gap-1 w-full px-1.5 py-0.5 text-[11px] font-semibold text-white rounded truncate leading-tight shadow-xs"
-                  title={`${props.petName} (${props.petBreed}) - ${props.serviceName} | ${statusLabel}`}
+                  title={tooltip}
                 >
-                  <span className="truncate">
+                  <span className="truncate flex items-center gap-1">
+                    {props.hasWarnings && <AlertTriangle className="h-3 w-3 shrink-0 text-amber-200" />}
                     {props.petName} · {props.serviceName}
                   </span>
                   <span className="text-[9px] font-bold uppercase opacity-90 shrink-0 bg-black/30 px-1 rounded">
@@ -394,18 +487,19 @@ export default function CalendarPage() {
               );
             }
 
-            // Short slot (<= 35 mins) in TimeGrid (Day/Week)
             if (isShortSlot) {
               return (
                 <div
                   className="flex items-center justify-between gap-1 text-xs font-medium leading-none overflow-hidden w-full whitespace-nowrap"
-                  title={`${props.petName} (${props.petBreed}) - ${props.serviceName} | Status: ${statusLabel} | Groomer: ${props.groomerName}${props.isPaid ? ' | Paid' : ''}`}
+                  title={tooltip}
                 >
                   <div className="flex items-center gap-1 truncate min-w-0">
+                    {props.hasWarnings && <AlertTriangle className="h-3 w-3 shrink-0 text-amber-200" />}
                     <span className="font-bold truncate shrink-0">{props.petName}</span>
                     <span className="opacity-80 truncate text-[10px]">· {props.serviceName}</span>
                   </div>
                   <div className="flex items-center gap-1 shrink-0 ml-1">
+                    {props.notes && <StickyNote className="h-2.5 w-2.5 opacity-85" />}
                     {props.isPaid && (
                       <span className="bg-emerald-950/40 text-emerald-100 border border-emerald-300/40 text-[8px] px-1 py-0.2 rounded font-semibold">
                         Paid
@@ -419,15 +513,14 @@ export default function CalendarPage() {
               );
             }
 
-            // Regular slot in TimeGrid (Day/Week)
             return (
               <div
                 className="flex flex-col justify-start h-full text-xs overflow-hidden leading-tight"
-                title={`${props.petName} (${props.petBreed}) - ${props.serviceName} | Status: ${statusLabel} | Groomer: ${props.groomerName}${props.isPaid ? ' | Paid' : ''}`}
+                title={tooltip}
               >
-                {/* Top Row: Pet Name, Paid Badge & Status Pill */}
                 <div className="flex items-center justify-between gap-1.5">
                   <div className="flex items-center gap-1 min-w-0">
+                    {props.hasWarnings && <AlertTriangle className="h-3 w-3 shrink-0 text-amber-200" />}
                     <span className="font-bold truncate text-[11.5px] sm:text-xs tracking-tight">
                       {props.petName}
                     </span>
@@ -437,23 +530,21 @@ export default function CalendarPage() {
                       </span>
                     )}
                   </div>
-                  <span className="bg-black/25 text-white text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider shrink-0 backdrop-blur-xs">
+                  <span className="bg-black/25 text-white text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider shrink-0">
                     {statusLabel}
                   </span>
                 </div>
 
-                {/* Subtitle: Breed + Service */}
                 <div className="flex items-center gap-1 text-[10px] font-medium opacity-90 mt-0.5 truncate">
                   <span className="opacity-80 font-normal shrink-0">{props.petBreed}</span>
                   <span className="opacity-60 shrink-0">·</span>
                   <span className="truncate">{props.serviceName}</span>
                 </div>
 
-                {/* Footer: Groomer if duration allows */}
                 {durationMins >= 60 && (
-                  <div className="flex items-center gap-1 text-[10px] opacity-85 mt-auto pt-1 border-t border-white/20">
-                    <span>✂</span>
-                    <span className="truncate font-medium">{props.groomerName}</span>
+                  <div className="flex items-center justify-between gap-1 text-[10px] opacity-85 mt-auto pt-1 border-t border-white/20">
+                    <span className="truncate font-medium">✂ {props.groomerName}</span>
+                    {props.notes && <StickyNote className="h-3 w-3 shrink-0 opacity-90" />}
                   </div>
                 )}
               </div>
@@ -509,7 +600,7 @@ export default function CalendarPage() {
             </div>
 
             <div className="rounded-lg bg-muted/50 p-3 text-xs text-muted-foreground space-y-1">
-              <p className="font-medium text-foreground">💡 How End Time works:</p>
+              <p className="font-medium text-foreground">How End Time works:</p>
               <p>
                 Choosing <strong>9:00 PM</strong> means 8:00 PM – 9:00 PM appointments are fully visible.
                 Choosing <strong>10:00 PM</strong> extends slots through 9:00 PM – 10:00 PM.
@@ -520,9 +611,7 @@ export default function CalendarPage() {
               <Button type="button" variant="outline" onClick={() => setIsHoursModalOpen(false)}>
                 Cancel
               </Button>
-              <Button type="submit">
-                Save Hours
-              </Button>
+              <Button type="submit">Save Hours</Button>
             </DialogFooter>
           </form>
         </DialogContent>

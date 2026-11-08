@@ -1,11 +1,21 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Clock, UserPlus, Search } from "lucide-react";
+import {
+  ArrowLeft,
+  Clock,
+  UserPlus,
+  Search,
+  AlertTriangle,
+  ShieldAlert,
+  Crown,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import {
   Card,
   CardContent,
@@ -25,30 +35,47 @@ import {
   getServices,
   getStaff,
   getCustomers,
+  getCustomerMembership,
   saveAppointment,
   saveCustomer,
   addPetToCustomer,
   calculateServicePrice,
   localDateStr,
+  newId,
+  findOverlappingAppointments,
+  getStaffShiftForDate,
+  isTimeWithinShift,
+  getPetEffectiveVaccinationExpiry,
+  isMembershipExpired,
   MockCustomer,
   MockPet,
   MockService,
   MockStaff,
 } from "@/lib/mock-data";
 import { ServiceSelectItems } from "@/components/service-select-items";
-import { PET_SIZE_LABELS } from "@/lib/utils";
+import { CustomerCombobox } from "@/components/customer-combobox";
+import {
+  PET_SIZE_LABELS,
+  COAT_TYPES,
+  normalizePhoneDigits,
+  formatPrice,
+  getVaccinationStatus,
+} from "@/lib/utils";
+import { showToast } from "@/components/ui/toast-system";
 
 export default function WalkInPage() {
   const router = useRouter();
   const [customers, setCustomers] = useState<MockCustomer[]>([]);
-  const [staff, setStaff] = useState<MockStaff[]>([]);
+  const [allStaff, setAllStaff] = useState<MockStaff[]>([]);
   const [services, setServices] = useState<MockService[]>([]);
+  const [showAllStaff, setShowAllStaff] = useState(false);
+
   const [isNewCustomer, setIsNewCustomer] = useState(false);
-  const [searchPhone, setSearchPhone] = useState("");
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
   const [selectedPetId, setSelectedPetId] = useState<string>("");
   const [selectedServiceId, setSelectedServiceId] = useState<string>("");
   const [selectedGroomerId, setSelectedGroomerId] = useState<string>("");
+  const [notes, setNotes] = useState<string>("");
   const [error, setError] = useState("");
 
   // New customer form state
@@ -56,7 +83,8 @@ export default function WalkInPage() {
   const [newOwnerPhone, setNewOwnerPhone] = useState("");
   const [newPetName, setNewPetName] = useState("");
   const [newPetBreed, setNewPetBreed] = useState("");
-  const [newPetSize, setNewPetSize] = useState<"SMALL" | "MEDIUM" | "LARGE" | "EXTRA_LARGE">("SMALL");
+  const [newPetSize, setNewPetSize] = useState<MockPet["size"]>("SMALL");
+  const [newPetCoat, setNewPetCoat] = useState<MockPet["coatType"]>("SHORT");
 
   useEffect(() => {
     const custs = getCustomers();
@@ -67,27 +95,97 @@ export default function WalkInPage() {
     } else {
       setIsNewCustomer(true);
     }
+
     const svcs = getServices();
     setServices(svcs);
     if (svcs.length > 0) setSelectedServiceId(svcs[0].id);
-    const staffList = getStaff().filter((s) => s.isActive !== false);
-    setStaff(staffList);
-    if (staffList.length > 0) setSelectedGroomerId(staffList[0].id);
+
+    const activeStaff = getStaff().filter((s) => s.isActive !== false);
+    setAllStaff(activeStaff);
+    const defaultGroomer =
+      activeStaff.find((s) => s.role === "GROOMER") || activeStaff[0];
+    if (defaultGroomer) setSelectedGroomerId(defaultGroomer.id);
   }, []);
 
-  // One source of truth: the customer shown on screen is the customer that gets booked.
+  const displayedStaff = useMemo(() => {
+    if (showAllStaff) return allStaff;
+    const groomers = allStaff.filter((s) => s.role === "GROOMER");
+    return groomers.length > 0 ? groomers : allStaff;
+  }, [allStaff, showAllStaff]);
+
+  useEffect(() => {
+    if (
+      displayedStaff.length > 0 &&
+      !displayedStaff.some((s) => s.id === selectedGroomerId)
+    ) {
+      setSelectedGroomerId(displayedStaff[0].id);
+    }
+  }, [displayedStaff, selectedGroomerId]);
+
   const activeCustomer = customers.find((c) => c.id === selectedCustomerId);
   const activePet: MockPet | undefined =
     activeCustomer?.pets.find((p) => p.id === selectedPetId) ?? activeCustomer?.pets[0];
+  const selectedService = services.find((s) => s.id === selectedServiceId);
+  const selectedGroomer = allStaff.find((g) => g.id === selectedGroomerId);
+  const membership =
+    !isNewCustomer && activeCustomer ? getCustomerMembership(activeCustomer.id) : undefined;
+
+  const estimatedPrice = useMemo(() => {
+    if (!selectedService) return 0;
+    if (isNewCustomer) {
+      return calculateServicePrice(
+        selectedService.id,
+        newPetSize,
+        newPetCoat,
+        newPetBreed
+      );
+    }
+    if (activePet) {
+      return calculateServicePrice(
+        selectedService.id,
+        activePet.size,
+        activePet.coatType,
+        activePet.breed
+      );
+    }
+    return selectedService.basePrice;
+  }, [selectedService, isNewCustomer, newPetSize, newPetCoat, newPetBreed, activePet]);
+
+  const now = new Date();
+  const todayStr = localDateStr(now);
+  const nowTime = `${String(now.getHours()).padStart(2, "0")}:${String(
+    now.getMinutes()
+  ).padStart(2, "0")}`;
+  const endDate = new Date(now.getTime() + (selectedService?.duration || 60) * 60000);
+  const endTimeStr =
+    localDateStr(endDate) === todayStr
+      ? `${String(endDate.getHours()).padStart(2, "0")}:${String(
+          endDate.getMinutes()
+        ).padStart(2, "0")}`
+      : "23:59";
+
+  const groomerShift = selectedGroomer ? getStaffShiftForDate(selectedGroomer, todayStr) : "";
+  const withinShift = selectedGroomer
+    ? isTimeWithinShift(nowTime, endTimeStr, groomerShift)
+    : true;
+  const overlapping = selectedGroomer
+    ? findOverlappingAppointments(selectedGroomer.id, todayStr, nowTime, endTimeStr)
+    : [];
+
+  const vacStatus =
+    !isNewCustomer && activePet
+      ? getVaccinationStatus(getPetEffectiveVaccinationExpiry(activePet))
+      : null;
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError("");
 
-    const service = services.find((s) => s.id === selectedServiceId);
-    const groomer = staff.find((g) => g.id === selectedGroomerId);
-    if (!service) return setError("Please select a service.");
-    if (!groomer) return setError("Please select a groomer. Add one under Staff & Shifts if the list is empty.");
+    if (!selectedService) return setError("Please select a service.");
+    if (!selectedGroomer)
+      return setError(
+        "Please select a groomer. Add one under Staff & Shifts if the list is empty."
+      );
 
     let customer: MockCustomer | undefined;
     let pet: MockPet | undefined;
@@ -96,28 +194,34 @@ export default function WalkInPage() {
       const name = newOwnerName.trim();
       const phone = newOwnerPhone.trim();
       const petName = newPetName.trim();
-      if (!name || !phone || !petName) return setError("Owner name, phone and pet name are required.");
+      if (!name || !phone || !petName) {
+        return setError("Owner name, phone and pet name are required.");
+      }
 
       const newPet: MockPet = {
-        id: `p_${Date.now()}`,
+        id: newId("p"),
         name: petName,
         breed: newPetBreed.trim() || "Mixed Breed",
         age: 2,
         size: newPetSize,
         weight: 5,
-        coatType: "SHORT",
+        coatType: newPetCoat,
         warnings: [],
       };
 
-      const digits = (s: string) => s.replace(/\D/g, "");
-      const existing = customers.find((c) => digits(c.phone) === digits(phone));
+      const targetDigits = normalizePhoneDigits(phone);
+      const existing = customers.find(
+        (c) => targetDigits && normalizePhoneDigits(c.phone) === targetDigits
+      );
+
       if (existing) {
-        // Same phone number = same owner: attach the pet instead of creating a duplicate customer
-        if (!addPetToCustomer(existing.id, newPet)) return setError("Could not save the pet. Please try again.");
+        if (!addPetToCustomer(existing.id, newPet)) {
+          return setError("Could not save the pet. Please try again.");
+        }
         customer = { ...existing, pets: [...existing.pets, newPet] };
       } else {
         customer = {
-          id: `c_${Date.now()}`,
+          id: newId("c"),
           name,
           phone,
           referralSource: "Walk-in",
@@ -129,16 +233,36 @@ export default function WalkInPage() {
     } else {
       customer = activeCustomer;
       pet = activePet;
-      if (!customer) return setError("Please search for and select an owner, or add a new one.");
-      if (!pet) return setError("This owner has no pets yet. Add a pet to their profile first, or use Quick Add New Owner.");
+      if (!customer)
+        return setError("Please select an owner, or switch to Quick Add New Owner.");
+      if (!pet)
+        return setError(
+          "This owner has no pets yet. Add a pet to their profile first, or use Quick Add New Owner."
+        );
     }
 
-    const now = new Date();
-    const endTime = new Date(now.getTime() + service.duration * 60000);
-    const price = calculateServicePrice(service.id, pet.size, pet.coatType);
+    const submitNow = new Date();
+    const submitEnd = new Date(submitNow.getTime() + selectedService.duration * 60000);
+    const submitStartStr = `${String(submitNow.getHours()).padStart(2, "0")}:${String(
+      submitNow.getMinutes()
+    ).padStart(2, "0")}`;
+    const submitEndStr =
+      localDateStr(submitEnd) === localDateStr(submitNow)
+        ? `${String(submitEnd.getHours()).padStart(2, "0")}:${String(
+            submitEnd.getMinutes()
+          ).padStart(2, "0")}`
+        : "23:59";
 
+    const price = calculateServicePrice(
+      selectedService.id,
+      pet.size,
+      pet.coatType,
+      pet.breed
+    );
+
+    const aptId = newId("apt");
     saveAppointment({
-      id: `apt_${Date.now()}`,
+      id: aptId,
       customerId: customer.id,
       customerName: customer.name,
       customerPhone: customer.phone,
@@ -147,23 +271,23 @@ export default function WalkInPage() {
       petBreed: pet.breed,
       petSize: pet.size,
       petCoatType: pet.coatType,
-      serviceId: service.id,
-      serviceName: service.name,
-      serviceDuration: service.duration,
+      serviceId: selectedService.id,
+      serviceName: selectedService.name,
+      serviceDuration: selectedService.duration,
       servicePrice: price,
-      groomerId: groomer.id,
-      groomerName: groomer.name,
-      status: "ARRIVED" as const,
+      groomerId: selectedGroomer.id,
+      groomerName: selectedGroomer.name,
+      status: "ARRIVED",
       isWalkIn: true,
-      notes: "Walk-in client checked in at front desk.",
-      dateStr: localDateStr(now),
-      startTime: now.toTimeString().slice(0, 5),
-      // Past midnight? Cap at 23:59 so the end time never sorts before the start time.
-      endTime: localDateStr(endTime) === localDateStr(now) ? endTime.toTimeString().slice(0, 5) : "23:59",
+      notes: notes.trim() || "Walk-in client checked in at front desk.",
+      dateStr: localDateStr(submitNow),
+      startTime: submitStartStr,
+      endTime: submitEndStr,
     });
-    router.push("/appointments");
-  }
 
+    showToast(`Checked in walk-in for ${pet.name}!`, "success");
+    router.push(`/appointments/${aptId}`);
+  }
 
   return (
     <div className="space-y-6">
@@ -172,7 +296,7 @@ export default function WalkInPage() {
           <ArrowLeft className="h-5 w-5" />
         </Button>
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-2xl font-bold tracking-tight">Walk-in Quick Entry</h1>
             <Badge variant="warning" className="gap-1">
               <Clock className="h-3 w-3" /> Status: Arrived Immediately
@@ -186,12 +310,11 @@ export default function WalkInPage() {
         <CardHeader>
           <CardTitle>Fast Check-In</CardTitle>
           <CardDescription>
-            Quickly locate or add customer, pick pet and service, auto-start appointment.
+            Locate an existing owner or add a new walk-in client in seconds.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-5">
-            {/* Customer Lookup or Quick Create */}
             <div className="flex items-center justify-between border-b pb-3">
               <span className="text-sm font-semibold">Customer Information</span>
               <Button
@@ -250,9 +373,12 @@ export default function WalkInPage() {
                     onChange={(e) => setNewPetBreed(e.target.value)}
                   />
                 </div>
-                <div className="space-y-1.5 sm:col-span-2">
+                <div className="space-y-1.5">
                   <Label>Pet Size</Label>
-                  <Select value={newPetSize} onValueChange={(v) => setNewPetSize(v as typeof newPetSize)}>
+                  <Select
+                    value={newPetSize}
+                    onValueChange={(v) => setNewPetSize(v as MockPet["size"])}
+                  >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
@@ -265,44 +391,69 @@ export default function WalkInPage() {
                     </SelectContent>
                   </Select>
                 </div>
+                <div className="space-y-1.5">
+                  <Label>Coat Type</Label>
+                  <Select
+                    value={newPetCoat}
+                    onValueChange={(v) => setNewPetCoat(v as MockPet["coatType"])}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {COAT_TYPES.map((c) => (
+                        <SelectItem key={c.value} value={c.value}>
+                          {c.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             ) : (
               <div className="space-y-3">
                 <div className="space-y-1.5">
-                  <Label>Search Owner by Name or Phone</Label>
-                  <Input
-                    placeholder="Type name or phone (e.g. Sarah, James)..."
-                    value={searchPhone}
-                    onChange={(e) => {
-                      const q = e.target.value;
-                      setSearchPhone(q);
-                      const needle = q.trim().toLowerCase();
-                      const match = needle
-                        ? customers.find(
-                            (c) => c.phone.includes(q.trim()) || c.name.toLowerCase().includes(needle)
-                          )
-                        : undefined;
-                      // No match -> nothing selected (never silently book someone else)
-                      setSelectedCustomerId(match ? match.id : "");
-                      setSelectedPetId(match?.pets[0]?.id ?? "");
+                  <Label>Find Owner by Name, Phone, or Pet *</Label>
+                  <CustomerCombobox
+                    customers={customers}
+                    value={selectedCustomerId}
+                    onChange={(id) => {
+                      setSelectedCustomerId(id);
+                      const cust = customers.find((c) => c.id === id);
+                      setSelectedPetId(cust?.pets[0]?.id ?? "");
                     }}
+                    showNewLink={false}
                   />
                 </div>
 
-                {searchPhone.trim() && !activeCustomer && (
-                  <p className="text-xs text-muted-foreground">
-                    No owner found. Use &quot;Quick Add New Owner&quot; above.
-                  </p>
+                {membership && (
+                  <div
+                    className={`rounded-lg border p-2.5 text-xs flex items-center justify-between gap-2 ${
+                      isMembershipExpired(membership)
+                        ? "bg-amber-50 border-amber-200 text-amber-900"
+                        : "bg-purple-50 border-purple-200 text-purple-900"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Crown className="h-4 w-4 shrink-0" />
+                      <span className="truncate font-medium">
+                        {membership.displayName}
+                        {membership.hasQueuePriority && " (Queue Priority)"}
+                      </span>
+                    </div>
+                    <span className="font-semibold shrink-0">
+                      {membership.packageType === "SESSIONS"
+                        ? `${membership.remainingSessions ?? 0} sessions left`
+                        : `${formatPrice(membership.remainingCredits)} credits`}
+                    </span>
+                  </div>
                 )}
 
                 {activeCustomer && (
                   <div className="rounded-lg border bg-muted/40 p-3 space-y-2">
-                    <p className="text-sm font-medium text-foreground">
-                      Selected: <span className="font-semibold text-primary">{activeCustomer.name}</span> ({activeCustomer.phone})
-                    </p>
                     {activeCustomer.pets.length === 0 ? (
                       <p className="text-xs text-destructive">
-                        No pets on file for this owner. Add a pet to their profile first, or use Quick Add New Owner.
+                        No pets on file for {activeCustomer.name}. Use Quick Add New Owner above or add a pet on their profile.
                       </p>
                     ) : (
                       <div className="space-y-1">
@@ -317,7 +468,7 @@ export default function WalkInPage() {
                           <SelectContent>
                             {activeCustomer.pets.map((p) => (
                               <SelectItem key={p.id} value={p.id}>
-                                {p.name} ({p.breed} - {p.size})
+                                {p.name} ({p.breed} · {p.size} · {p.coatType})
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -326,6 +477,44 @@ export default function WalkInPage() {
                     )}
                   </div>
                 )}
+
+                {activePet &&
+                  (activePet.warnings.length > 0 ||
+                    vacStatus?.status === "EXPIRED" ||
+                    vacStatus?.status === "EXPIRING_SOON") && (
+                    <div className="space-y-2">
+                      {activePet.warnings.length > 0 && (
+                        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-900 space-y-1">
+                          <p className="font-semibold flex items-center gap-1.5">
+                            <AlertTriangle className="h-4 w-4 text-red-600 shrink-0" />
+                            Handling Alerts for {activePet.name}:
+                          </p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {activePet.warnings.map((w, idx) => (
+                              <Badge
+                                key={idx}
+                                variant="outline"
+                                className="bg-white/80 text-red-800 border-red-300 text-[11px]"
+                              >
+                                {w}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {vacStatus &&
+                        (vacStatus.status === "EXPIRED" ||
+                          vacStatus.status === "EXPIRING_SOON") && (
+                          <div className="rounded-lg border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-900 flex items-center gap-2">
+                            <ShieldAlert className="h-4 w-4 text-amber-600 shrink-0" />
+                            <span>
+                              <strong>Vaccination notice:</strong> {vacStatus.label}
+                            </span>
+                          </div>
+                        )}
+                    </div>
+                  )}
               </div>
             )}
 
@@ -343,18 +532,24 @@ export default function WalkInPage() {
               </div>
 
               <div className="space-y-1.5">
-                <Label>Assign Groomer *</Label>
-                <Select
-                  value={selectedGroomerId}
-                  onValueChange={setSelectedGroomerId}
-                >
+                <div className="flex items-center justify-between">
+                  <Label>Assign Groomer *</Label>
+                  <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer">
+                    <Switch
+                      checked={showAllStaff}
+                      onCheckedChange={setShowAllStaff}
+                    />
+                    All staff
+                  </label>
+                </div>
+                <Select value={selectedGroomerId} onValueChange={setSelectedGroomerId}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select groomer" />
                   </SelectTrigger>
                   <SelectContent>
-                    {staff.map((g) => (
+                    {displayedStaff.map((g) => (
                       <SelectItem key={g.id} value={g.id}>
-                        ✂ {g.name}
+                        ✂ {g.name} ({getStaffShiftForDate(g, todayStr)})
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -362,9 +557,48 @@ export default function WalkInPage() {
               </div>
             </div>
 
+            {selectedGroomer && (!withinShift || overlapping.length > 0) && (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 space-y-1">
+                {!withinShift && (
+                  <p>
+                    <strong>Shift notice:</strong> {selectedGroomer.name}&apos;s shift today is{" "}
+                    {groomerShift}.
+                  </p>
+                )}
+                {overlapping.length > 0 && (
+                  <p className="text-red-800">
+                    <strong>Conflict notice:</strong> {selectedGroomer.name} is currently booked
+                    with {overlapping.map((o) => `${o.petName} (${o.startTime}–${o.endTime})`).join(", ")}.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {selectedService && (
+              <div className="rounded-lg bg-muted/50 border px-3 py-2 text-xs flex items-center justify-between">
+                <span className="text-muted-foreground">
+                  Est. {selectedService.duration} mins · Starting immediately ({nowTime}–{endTimeStr})
+                </span>
+                <span className="font-bold text-sm text-primary">
+                  {formatPrice(estimatedPrice)}
+                </span>
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <Label htmlFor="walkin-notes">Check-in Notes</Label>
+              <Textarea
+                id="walkin-notes"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Walk-in instructions, coat state, pickup time..."
+                rows={2}
+              />
+            </div>
+
             {error && <p className="text-sm text-destructive">{error}</p>}
 
-            <div className="flex justify-end gap-2 pt-4">
+            <div className="flex justify-end gap-2 pt-2">
               <Button type="button" variant="outline" onClick={() => router.back()}>
                 Cancel
               </Button>

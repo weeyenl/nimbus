@@ -25,6 +25,8 @@ drop table if exists public.staff cascade;
 drop table if exists public.addons cascade;
 drop table if exists public.memberships cascade;
 drop table if exists public.promo_codes cascade;
+drop table if exists public.settings cascade;
+drop table if exists public.backups cascade;
 drop table if exists public._prisma_migrations cascade;
 
 -- 2. CREATE ALL REQUIRED NIMBUS CLOUD TABLES WITH (id, data, updated_at)
@@ -82,7 +84,25 @@ create table public.addons (
   updated_at timestamptz not null default now()
 );
 
--- 3. ENABLE ROW LEVEL SECURITY & FULL ACCESS POLICY FOR AUTHENTICATED STAFF
+create table public.promo_codes (
+  id text primary key,
+  data jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
+create table public.settings (
+  id text primary key,
+  data jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
+create table public.backups (
+  id text primary key,
+  data jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
+-- 3. ENABLE ROW LEVEL SECURITY & ACCESS POLICIES FOR AUTHENTICATED STAFF
 do $$
 declare
   t text;
@@ -96,7 +116,10 @@ begin
     'grooming_records',
     'payments',
     'services',
-    'addons'
+    'addons',
+    'promo_codes',
+    'settings',
+    'backups'
   ]
   loop
     execute format('alter table public.%I enable row level security', t);

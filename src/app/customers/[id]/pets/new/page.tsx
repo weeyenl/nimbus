@@ -1,12 +1,11 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, AlertTriangle, Plus, X } from "lucide-react";
+import { ArrowLeft, AlertTriangle, Plus, X, Camera, Syringe, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Card,
   CardContent,
@@ -15,6 +14,7 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Select,
   SelectContent,
@@ -22,32 +22,31 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { PET_SIZE_LABELS } from "@/lib/utils";
-import { addPetToCustomer, MockPet } from "@/lib/mock-data";
-
-const COAT_TYPES = [
-  { value: "SHORT", label: "Short" },
-  { value: "MEDIUM", label: "Medium" },
-  { value: "LONG", label: "Long" },
-  { value: "DOUBLE", label: "Double Coat" },
-  { value: "WIRE", label: "Wire / Coarse" },
-  { value: "CURLY", label: "Curly / Wool" },
-];
-
-const PRESET_WARNINGS = [
-  "Bites when paws touched",
-  "Anxious with loud dryer noises",
-  "Sensitive skin / Allergies",
-  "Elderly / Hip dysplasia",
-  "Aggressive with other dogs",
-  "Cannot stand for long periods",
-  "Collapsed trachea — handle neck gently",
-];
+import {
+  PET_SIZE_LABELS,
+  COAT_TYPES,
+  PRESET_WARNINGS,
+  compressImageToDataUrl,
+} from "@/lib/utils";
+import {
+  addPetToCustomer,
+  newId,
+  MockPet,
+  PetVaccination,
+} from "@/lib/mock-data";
+import { showToast } from "@/components/ui/toast-system";
 
 export default function NewPetPage({ params }: { params: { id: string } }) {
   const router = useRouter();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [photoUrl, setPhotoUrl] = useState<string>("");
   const [selectedWarnings, setSelectedWarnings] = useState<string[]>([]);
   const [customWarning, setCustomWarning] = useState("");
+  const [vaccinations, setVaccinations] = useState<PetVaccination[]>([]);
+  const [vacName, setVacName] = useState("");
+  const [vacDateGiven, setVacDateGiven] = useState("");
+  const [vacExpiry, setVacExpiry] = useState("");
 
   function togglePresetWarning(warning: string) {
     if (selectedWarnings.includes(warning)) {
@@ -64,26 +63,77 @@ export default function NewPetPage({ params }: { params: { id: string } }) {
     }
   }
 
+  async function handlePhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await compressImageToDataUrl(file);
+      setPhotoUrl(dataUrl);
+      showToast("Pet photo attached!", "success");
+    } catch {
+      showToast("Could not process that image file.", "error");
+    }
+  }
+
+  function addVaccinationRow() {
+    if (!vacName.trim() || !vacExpiry) {
+      showToast("Enter both vaccine name and expiry date.", "error");
+      return;
+    }
+    setVaccinations((prev) => [
+      ...prev,
+      {
+        id: newId("vac"),
+        name: vacName.trim(),
+        dateGiven: vacDateGiven || undefined,
+        expiryDate: vacExpiry,
+      },
+    ]);
+    setVacName("");
+    setVacDateGiven("");
+    setVacExpiry("");
+  }
+
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
 
+    const parsedAge = parseFloat(String(formData.get("age") ?? ""));
+    const parsedWeight = parseFloat(String(formData.get("weight") ?? ""));
+    const quickVacExpiry = (formData.get("vaccinationExpiry") as string) || undefined;
+
+    const finalVaccinations = [...vaccinations];
+    if (finalVaccinations.length === 0 && quickVacExpiry) {
+      finalVaccinations.push({
+        id: newId("vac"),
+        name: "Core Vaccine (DHPP / Rabies)",
+        expiryDate: quickVacExpiry,
+      });
+    }
+
     const newPet: MockPet = {
-      id: `p_${Date.now()}`,
+      id: newId("p"),
       name: (formData.get("name") as string).trim(),
       breed: (formData.get("breed") as string)?.trim() || "Mixed Breed",
-      age: Number(formData.get("age")) || 1,
-      size: (formData.get("size") as any) || "SMALL",
-      weight: Number(formData.get("weight")) || 5,
-      coatType: (formData.get("coatType") as any) || "SHORT",
+      age: Number.isFinite(parsedAge) && parsedAge >= 0 ? parsedAge : 1,
+      size: (formData.get("size") as MockPet["size"]) || "SMALL",
+      weight: Number.isFinite(parsedWeight) && parsedWeight >= 0 ? parsedWeight : 5,
+      coatType: (formData.get("coatType") as MockPet["coatType"]) || "SHORT",
+      photoUrl: photoUrl || undefined,
       warnings: selectedWarnings,
-      vaccinationExpiry: (formData.get("vaccinationExpiry") as string) || undefined,
+      vaccinations: finalVaccinations.length > 0 ? finalVaccinations : undefined,
+      vaccinationExpiry:
+        finalVaccinations[0]?.expiryDate || quickVacExpiry || undefined,
     };
 
     if (!addPetToCustomer(params.id, newPet)) {
-      alert("Could not find this customer, so the pet was not saved. Go back to the customer list and try again.");
+      showToast(
+        "Could not find this customer. Return to the customer list and try again.",
+        "error"
+      );
       return;
     }
+    showToast(`Added ${newPet.name} to customer profile!`, "success");
     router.push(`/customers/${params.id}`);
   }
 
@@ -103,11 +153,56 @@ export default function NewPetPage({ params }: { params: { id: string } }) {
         <CardHeader>
           <CardTitle>Pet Profile</CardTitle>
           <CardDescription>
-            Enter pet details, size, coat type, vaccination, and permanent warnings.
+            Upload a photo, add coat details, vaccination records, and permanent warnings.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-5">
+            {/* Photo Upload */}
+            <div className="flex items-center gap-4 rounded-lg border bg-muted/30 p-3">
+              <Avatar className="h-16 w-16 border shrink-0">
+                {photoUrl && (
+                  <AvatarImage src={photoUrl} alt="Pet preview" className="object-cover" />
+                )}
+                <AvatarFallback className="bg-primary/10 text-primary">
+                  <Camera className="h-6 w-6" />
+                </AvatarFallback>
+              </Avatar>
+              <div className="flex-1 space-y-1.5">
+                <Label className="text-xs font-semibold">Pet Photo (Optional)</Label>
+                <div className="flex flex-wrap gap-2">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handlePhotoUpload}
+                    className="hidden"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-8 text-xs gap-1.5"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <Camera className="h-3.5 w-3.5" />{" "}
+                    {photoUrl ? "Change Photo" : "Upload Photo"}
+                  </Button>
+                  {photoUrl && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-8 text-xs text-destructive"
+                      onClick={() => setPhotoUrl("")}
+                    >
+                      Remove
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </div>
+
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="name">Pet Name *</Label>
@@ -116,7 +211,12 @@ export default function NewPetPage({ params }: { params: { id: string } }) {
 
               <div className="space-y-1.5">
                 <Label htmlFor="breed">Breed *</Label>
-                <Input id="breed" name="breed" placeholder="e.g. Toy Poodle, Golden Retriever" required />
+                <Input
+                  id="breed"
+                  name="breed"
+                  placeholder="e.g. Toy Poodle, Golden Retriever"
+                  required
+                />
               </div>
             </div>
 
@@ -155,32 +255,112 @@ export default function NewPetPage({ params }: { params: { id: string } }) {
 
               <div className="space-y-1.5">
                 <Label htmlFor="weight">Weight (kg)</Label>
-                <Input id="weight" name="weight" type="number" step="0.1" placeholder="4.5" defaultValue="5" />
+                <Input
+                  id="weight"
+                  name="weight"
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  placeholder="4.5"
+                  defaultValue="5"
+                />
               </div>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="age">Age (years)</Label>
-                <Input id="age" name="age" type="number" min="0" placeholder="3" defaultValue="2" />
+                <Input
+                  id="age"
+                  name="age"
+                  type="number"
+                  step="0.5"
+                  min="0"
+                  placeholder="3"
+                  defaultValue="2"
+                />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="vaccinationExpiry">Vaccination Expiry Date</Label>
+                <Label htmlFor="vaccinationExpiry">Primary Vaccine Expiry (Quick Add)</Label>
                 <Input id="vaccinationExpiry" name="vaccinationExpiry" type="date" />
               </div>
+            </div>
+
+            {/* Detailed Vaccination Records Builder */}
+            <div className="rounded-lg border p-3.5 space-y-3 bg-muted/20">
+              <div className="flex items-center gap-2 text-xs font-semibold">
+                <Syringe className="h-4 w-4 text-primary" />
+                Specific Vaccination Certificates (Optional)
+              </div>
+              <div className="grid gap-2 sm:grid-cols-3">
+                <Input
+                  placeholder="Vaccine (e.g. Rabies, DHPPi)"
+                  value={vacName}
+                  onChange={(e) => setVacName(e.target.value)}
+                  className="text-xs h-8 bg-background"
+                />
+                <Input
+                  type="date"
+                  value={vacDateGiven}
+                  onChange={(e) => setVacDateGiven(e.target.value)}
+                  title="Date given"
+                  className="text-xs h-8 bg-background"
+                />
+                <div className="flex gap-1.5">
+                  <Input
+                    type="date"
+                    value={vacExpiry}
+                    onChange={(e) => setVacExpiry(e.target.value)}
+                    title="Expiry date"
+                    className="text-xs h-8 bg-background flex-1"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-8 px-2"
+                    onClick={addVaccinationRow}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+              {vaccinations.length > 0 && (
+                <div className="space-y-1">
+                  {vaccinations.map((v) => (
+                    <div
+                      key={v.id}
+                      className="flex items-center justify-between text-xs bg-background rounded border px-2.5 py-1.5"
+                    >
+                      <span>
+                        <strong>{v.name}</strong> · Exp: {v.expiryDate}
+                        {v.dateGiven && ` (Given: ${v.dateGiven})`}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setVaccinations((prev) => prev.filter((item) => item.id !== v.id))
+                        }
+                        className="text-destructive hover:opacity-75"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Permanent Warnings Section */}
             <div className="space-y-3 rounded-lg border border-warning/30 bg-warning/5 p-4">
               <div className="flex items-center gap-2 font-semibold text-sm text-warning-foreground">
                 <AlertTriangle className="h-4 w-4" />
-                Permanent Health & Behaviour Warnings
+                Permanent Health &amp; Behaviour Warnings
               </div>
               <p className="text-xs text-muted-foreground">
-                Click preset tags or add custom warnings. These persist permanently on the pet&apos;s profile and flash on appointment booking.
+                Tap preset tags or add custom alerts shown to groomers before handling.
               </p>
 
-              {/* Preset clickable tags */}
               <div className="flex flex-wrap gap-1.5 pt-1">
                 {PRESET_WARNINGS.map((warning) => {
                   const isSelected = selectedWarnings.includes(warning);
@@ -197,10 +377,9 @@ export default function NewPetPage({ params }: { params: { id: string } }) {
                 })}
               </div>
 
-              {/* Custom warning addition */}
               <div className="flex gap-2 pt-2">
                 <Input
-                  placeholder="Add custom warning (e.g. skin rash behind left ear)..."
+                  placeholder="Add custom warning (e.g. sensitive left ear)..."
                   value={customWarning}
                   onChange={(e) => setCustomWarning(e.target.value)}
                   className="text-xs h-9 bg-background"
@@ -216,7 +395,6 @@ export default function NewPetPage({ params }: { params: { id: string } }) {
                 </Button>
               </div>
 
-              {/* Active warnings list */}
               {selectedWarnings.length > 0 && (
                 <div className="pt-2">
                   <span className="text-xs font-semibold text-warning-foreground block mb-1">

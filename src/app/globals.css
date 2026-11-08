@@ -316,3 +316,53 @@
     text-align: center !important;
   }
 }
+
+/* Print styles for receipts & daily reports */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  html,
+  body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  .app-shell-root,
+  .app-shell-main,
+  main {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  body.printing-receipt .app-shell-root {
+    display: none !important;
+  }
+
+  body.printing-receipt [role="dialog"] {
+    position: static !important;
+    transform: none !important;
+    left: auto !important;
+    top: auto !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    max-height: none !important;
+    overflow: visible !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 auto !important;
+    background: #ffffff !important;
+  }
+
+  .print-area {
+    display: block !important;
+    width: 100% !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+}

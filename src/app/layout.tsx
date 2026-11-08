@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { AppShell } from "@/components/layout/app-shell";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { ToastViewport } from "@/components/ui/toast-system";
 
 export const metadata: Metadata = {
   title: "Nimbus — Grooming Management",
@@ -31,6 +32,7 @@ export default function RootLayout({
       <body className="font-sans antialiased">
         <TooltipProvider>
           <AppShell>{children}</AppShell>
+          <ToastViewport />
         </TooltipProvider>
       </body>
     </html>

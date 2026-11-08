@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -21,59 +21,76 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { REFERRAL_SOURCES, PET_SIZE_LABELS } from "@/lib/utils";
-import { saveCustomer, MockCustomer, MockPet } from "@/lib/mock-data";
-
-const COAT_TYPES = [
-  { value: "SHORT", label: "Short" },
-  { value: "MEDIUM", label: "Medium" },
-  { value: "LONG", label: "Long" },
-  { value: "DOUBLE", label: "Double Coat" },
-  { value: "WIRE", label: "Wire / Coarse" },
-  { value: "CURLY", label: "Curly / Wool" },
-];
+import {
+  REFERRAL_SOURCES,
+  PET_SIZE_LABELS,
+  COAT_TYPES,
+  normalizePhoneDigits,
+} from "@/lib/utils";
+import {
+  saveCustomer,
+  getCustomers,
+  newId,
+  MockCustomer,
+  MockPet,
+} from "@/lib/mock-data";
+import { showToast } from "@/components/ui/toast-system";
 
 export default function NewCustomerPage() {
   const router = useRouter();
+  const [phoneInput, setPhoneInput] = useState("");
+
+  const matchingExisting = (() => {
+    const digits = normalizePhoneDigits(phoneInput);
+    if (digits.length < 6) return undefined;
+    return getCustomers().find((c) => normalizePhoneDigits(c.phone) === digits);
+  })();
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
-    const name = formData.get("name") as string;
-    const phone = formData.get("phone") as string;
-    const email = formData.get("email") as string;
-    const address = formData.get("address") as string;
-    const referralSource = formData.get("referralSource") as string;
-    const notes = formData.get("notes") as string;
+    const name = ((formData.get("name") as string) || "").trim();
+    const phone = ((formData.get("phone") as string) || "").trim();
+    const email = ((formData.get("email") as string) || "").trim();
+    const address = ((formData.get("address") as string) || "").trim();
+    const referralSource = (formData.get("referralSource") as string) || "";
+    const notes = ((formData.get("notes") as string) || "").trim();
     const petName = ((formData.get("petName") as string) || "").trim();
-    const petBreed = formData.get("petBreed") as string;
-    const petSize = ((formData.get("petSize") as MockPet["size"]) || "SMALL");
-    const petCoat = ((formData.get("petCoat") as MockPet["coatType"]) || "SHORT");
+    const petBreed = ((formData.get("petBreed") as string) || "").trim();
+    const petSize = (formData.get("petSize") as MockPet["size"]) || "SMALL";
+    const petCoat = (formData.get("petCoat") as MockPet["coatType"]) || "SHORT";
+
+    if (!name || !phone) {
+      showToast("Owner name and phone number are required.", "error");
+      return;
+    }
 
     const newCustomer: MockCustomer = {
-      id: `c_${Date.now()}`,
-      name: name.trim(),
-      phone: phone.trim(),
-      email: email ? email.trim() : undefined,
-      address: address ? address.trim() : undefined,
+      id: newId("c"),
+      name,
+      phone,
+      email: email || undefined,
+      address: address || undefined,
       referralSource: referralSource || undefined,
-      notes: notes ? notes.trim() : undefined,
-      pets: petName ? [
-        {
-          id: `p_${Date.now()}`,
-          name: petName,
-          breed: petBreed ? petBreed.trim() : "Mixed Breed",
-          age: 2,
-          size: petSize,
-          weight: 5,
-          coatType: petCoat,
-          warnings: [],
-        }
-      ] : [],
+      notes: notes || undefined,
+      pets: petName
+        ? [
+            {
+              id: newId("p"),
+              name: petName,
+              breed: petBreed || "Mixed Breed",
+              age: 2,
+              size: petSize,
+              weight: 5,
+              coatType: petCoat,
+              warnings: [],
+            },
+          ]
+        : [],
     };
 
     saveCustomer(newCustomer);
-    // Go straight to the profile so pets can be added / booked right away
+    showToast(`Customer ${newCustomer.name} created!`, "success");
     router.push(`/customers/${newCustomer.id}`);
   }
 
@@ -85,15 +102,13 @@ export default function NewCustomerPage() {
         </Button>
         <div>
           <h1 className="text-2xl font-bold tracking-tight">New Customer</h1>
-          <p className="text-muted-foreground">
-            Register a new pet owner and their pet
-          </p>
+          <p className="text-muted-foreground">Register a new pet owner and their pet</p>
         </div>
       </div>
 
       <Card className="mx-auto max-w-2xl shadow-sm">
         <CardHeader>
-          <CardTitle>Owner & Pet Details</CardTitle>
+          <CardTitle>Owner &amp; Pet Details</CardTitle>
           <CardDescription>
             Fill in the pet owner&apos;s information. Phone number is required.
           </CardDescription>
@@ -103,12 +118,7 @@ export default function NewCustomerPage() {
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="name">Owner Full Name *</Label>
-                <Input
-                  id="name"
-                  name="name"
-                  placeholder="e.g. Sarah Tan"
-                  required
-                />
+                <Input id="name" name="name" placeholder="e.g. Sarah Tan" required />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="phone">Phone Number *</Label>
@@ -117,8 +127,23 @@ export default function NewCustomerPage() {
                   name="phone"
                   type="tel"
                   placeholder="+65 9123 4567"
+                  value={phoneInput}
+                  onChange={(e) => setPhoneInput(e.target.value)}
                   required
                 />
+                {matchingExisting && (
+                  <p className="text-xs text-amber-700 font-medium">
+                    Note: Phone matches existing owner{" "}
+                    <button
+                      type="button"
+                      onClick={() => router.push(`/customers/${matchingExisting.id}`)}
+                      className="underline font-semibold"
+                    >
+                      {matchingExisting.name}
+                    </button>
+                    .
+                  </p>
+                )}
               </div>
             </div>
 
@@ -213,11 +238,7 @@ export default function NewCustomerPage() {
             </div>
 
             <div className="flex justify-end gap-2 pt-4">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => router.back()}
-              >
+              <Button type="button" variant="outline" onClick={() => router.back()}>
                 Cancel
               </Button>
               <Button type="submit">Create Customer</Button>
